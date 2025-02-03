@@ -23,10 +23,16 @@ server = app.server  # This is needed for production deployment
 port = int(os.environ.get('PORT', 8051))
 host = '0.0.0.0'
 
-# Added database existence check for dashboard
-_db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
+# Updated database path configuration
+if os.environ.get('RENDER'):
+    # Production path on Render
+    _db_path = Path('/opt/render/project/src/data/processed/saber_pro.db')
+else:
+    # Development path
+    _db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
+
 _db_warning = None if _db_path.exists() else html.Div(
-    "Base de datos no encontrada. Por favor, ejecute create_database.py primero para crear y poblar la base de datos.",
+    f"Base de datos no encontrada en {_db_path}. Por favor, ejecute create_database.py primero para crear y poblar la base de datos.",
     style={
         'color': 'white',
         'backgroundColor': '#f44336',

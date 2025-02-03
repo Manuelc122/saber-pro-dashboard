@@ -5,6 +5,7 @@ from pathlib import Path
 import logging
 from tqdm import tqdm
 from typing import Dict
+import os
 
 class SaberProProcessor:
     def __init__(self, file_path: str):
@@ -185,8 +186,13 @@ class SaberProProcessor:
 def query_db(query, params=None):
     """Helper function to run SQL queries"""
     try:
-        # Use absolute path with Path
-        db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
+        # Use the same path configuration as app.py
+        if os.environ.get('RENDER'):
+            # Production path on Render
+            db_path = Path('/opt/render/project/src/data/processed/saber_pro.db')
+        else:
+            # Development path
+            db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
         
         if not db_path.exists():
             print(f"Database not found at: {db_path}")
