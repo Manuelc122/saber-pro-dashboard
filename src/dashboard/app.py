@@ -19,6 +19,10 @@ app = Dash(__name__,
 # Add this near the top after app initialization
 server = app.server  # This is needed for production deployment
 
+# Add port configuration
+port = int(os.environ.get('PORT', 8051))
+host = '0.0.0.0'
+
 # Added database existence check for dashboard
 _db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
 _db_warning = None if _db_path.exists() else html.Div(
@@ -1767,4 +1771,4 @@ def update_student_characteristics_summary(_):
     })
 
 if __name__ == '__main__':
-    app.run_server(debug=True, host='0.0.0.0', port=8051) 
+    app.run_server(debug=True, host=host, port=port) 
