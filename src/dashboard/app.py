@@ -462,7 +462,7 @@ def create_base_graph_layout(title, xaxis_title, yaxis_title, df, show_legend=Fa
             bordercolor=COLORS['primary'],
             borderwidth=1
         ),
-        margin=dict(l=60, r=60, t=100, b=150),  # Increased bottom margin for source annotation
+        margin=STYLES['graph']['margin'],
         height=STYLES['graph']['height'],
         annotations=[
             dict(
@@ -2516,7 +2516,7 @@ def update_tuition_performance_graph(metric, institution_type):
             customdata=df['count']
         ))
     
-    # Update layout using the base layout function
+    # Update layout
     fig.update_layout(
         title=dict(
             text=f'Relación entre Costos de Matrícula y {metric_translations[metric]}',
@@ -2573,7 +2573,7 @@ def update_tuition_performance_graph(metric, institution_type):
             bordercolor='#2c3e50',
             borderwidth=1
         ),
-        margin=dict(l=60, r=60, t=100, b=60),  # Reduced bottom margin since legend is now at top
+        margin=dict(l=60, r=60, t=100, b=60),
         height=700,
         annotations=[
             dict(
