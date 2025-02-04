@@ -495,6 +495,7 @@ app.layout = html.Div([
         ]),
         dcc.Tab(label="Análisis de Relaciones", children=[
             html.Div([
+                # Time Performance Section
                 html.Div([
                     html.H4("Desempeño a lo Largo del Tiempo", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
                     html.Div([
@@ -514,6 +515,28 @@ app.layout = html.Div([
                         )
                     ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
                     dcc.Graph(id='performance-graph'),
+                ], className='card'),
+                
+                # Socioeconomic Analysis Section
+                html.Div([
+                    html.H4("Desempeño por Estrato Socioeconómico", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
+                    html.Div([
+                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
+                        dcc.Dropdown(
+                            id='strata-performance-metric',
+                            options=[
+                                {'label': 'Promedio General', 'value': 'avg_score'},
+                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
+                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
+                                {'label': 'Inglés', 'value': 'english_score'},
+                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
+                            ],
+                            value='avg_score',
+                            style={'width': '300px'},
+                            clearable=False
+                        )
+                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
+                    dcc.Graph(id='strata-performance-graph'),
                 ], className='card')
             ])
         ])
@@ -1928,6 +1951,132 @@ def update_student_characteristics_summary(_):
         'borderRadius': '10px',
         'marginBottom': '20px'
     })
+
+# Add new callback for strata performance graph
+@app.callback(
+    Output('strata-performance-graph', 'figure'),
+    [Input('strata-performance-metric', 'value')]
+)
+def update_strata_performance_graph(metric):
+    # Define the metric mapping
+    metric_mapping = {
+        'avg_score': '(mod_razona_cuantitat_punt + mod_lectura_critica_punt + mod_ingles_punt + mod_competen_ciudada_punt)/4.0',
+        'math_score': 'mod_razona_cuantitat_punt',
+        'reading_score': 'mod_lectura_critica_punt',
+        'english_score': 'mod_ingles_punt',
+        'citizenship_score': 'mod_competen_ciudada_punt'
+    }
+    
+    # Query to get average scores by strata
+    query = f"""
+    SELECT 
+        fami_estratovivienda as estrato,
+        ROUND(AVG({metric_mapping[metric]}), 2) as score,
+        COUNT(*) as count
+    FROM saber_pro
+    WHERE fami_estratovivienda != 'Sin estrato'
+    GROUP BY fami_estratovivienda
+    ORDER BY 
+        CAST(REPLACE(fami_estratovivienda, 'Estrato ', '') AS INTEGER)
+    """
+    
+    df = query_db(query)
+    
+    if df.empty:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No hay datos disponibles para el análisis por estrato",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color='#2c3e50')
+        )
+        return fig
+
+    # Spanish translations for metric names
+    metric_translations = {
+        'math_score': 'Razonamiento Cuantitativo',
+        'reading_score': 'Lectura Crítica',
+        'english_score': 'Inglés',
+        'citizenship_score': 'Competencias Ciudadanas',
+        'avg_score': 'Promedio General'
+    }
+
+    # Create figure
+    fig = go.Figure()
+    
+    # Add bars for scores
+    fig.add_trace(go.Bar(
+        x=df['estrato'],
+        y=df['score'],
+        text=[f'{score:.1f}' for score in df['score']],
+        textposition='auto',
+        marker_color='#1976D2',
+        name='Puntaje Promedio',
+        hovertemplate="<b>%{x}</b><br>" +
+                     "Puntaje: %{y:.1f}<br>" +
+                     "Estudiantes: %{customdata:,.0f}<br>" +
+                     "<extra></extra>",
+        customdata=df['count']
+    ))
+    
+    # Update layout
+    fig.update_layout(
+        title=dict(
+            text=f'Relación entre Estrato Socioeconómico y {metric_translations[metric]}',
+            font=dict(size=22, color='#2c3e50', family='Roboto, sans-serif'),
+            x=0.5,
+            y=0.95
+        ),
+        xaxis=dict(
+            title=dict(
+                text='Estrato Socioeconómico',
+                font=dict(size=14, color='#2c3e50', family='Roboto, sans-serif')
+            ),
+            showgrid=True,
+            gridcolor='rgba(189, 195, 199, 0.4)',
+            showline=True,
+            linewidth=2,
+            linecolor='#2c3e50'
+        ),
+        yaxis=dict(
+            title=dict(
+                text='Puntaje Promedio',
+                font=dict(size=14, color='#2c3e50', family='Roboto, sans-serif')
+            ),
+            showgrid=True,
+            gridcolor='rgba(189, 195, 199, 0.4)',
+            showline=True,
+            linewidth=2,
+            linecolor='#2c3e50',
+            range=[min(df['score']) - 2, max(df['score']) + 2]
+        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        showlegend=False,
+        margin=dict(l=60, r=60, t=100, b=60),
+        annotations=[
+            dict(
+                text='Fuente: Base de Datos Saber Pro',
+                xref='paper',
+                yref='paper',
+                x=1,
+                y=-0.15,
+                showarrow=False,
+                font=dict(size=12, color='#7f8c8d', family='Roboto, sans-serif'),
+                align='right'
+            )
+        ],
+        hovermode='x unified'
+    )
+    
+    # Add a subtle grid pattern
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(189, 195, 199, 0.2)')
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(189, 195, 199, 0.2)')
+    
+    return fig
 
 if __name__ == '__main__':
     app.run_server(debug=True, host=host, port=port) 
