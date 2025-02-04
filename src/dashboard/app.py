@@ -2172,7 +2172,19 @@ def update_parents_education_graphs(metric):
         fami_educacionmadre as education_level,
         ROUND(AVG({metric_mapping[metric]}), 2) as score,
         COUNT(*) as count,
-        {education_order} as order_num
+        CASE fami_educacionmadre
+            WHEN 'Postgrado' THEN 1
+            WHEN 'Educación profesional completa' THEN 2
+            WHEN 'Educación profesional incompleta' THEN 3
+            WHEN 'Técnica o tecnológica completa' THEN 4
+            WHEN 'Técnica o tecnológica incompleta' THEN 5
+            WHEN 'Secundaria (Bachillerato) completa' THEN 6
+            WHEN 'Secundaria (Bachillerato) incompleta' THEN 7
+            WHEN 'Primaria completa' THEN 8
+            WHEN 'Primaria incompleta' THEN 9
+            WHEN 'Ninguno' THEN 10
+            ELSE 11
+        END as order_num
     FROM saber_pro
     WHERE fami_educacionmadre NOT IN ('No sabe', 'No Aplica')
     GROUP BY fami_educacionmadre
@@ -2185,7 +2197,19 @@ def update_parents_education_graphs(metric):
         fami_educacionpadre as education_level,
         ROUND(AVG({metric_mapping[metric]}), 2) as score,
         COUNT(*) as count,
-        {education_order} as order_num
+        CASE fami_educacionpadre
+            WHEN 'Postgrado' THEN 1
+            WHEN 'Educación profesional completa' THEN 2
+            WHEN 'Educación profesional incompleta' THEN 3
+            WHEN 'Técnica o tecnológica completa' THEN 4
+            WHEN 'Técnica o tecnológica incompleta' THEN 5
+            WHEN 'Secundaria (Bachillerato) completa' THEN 6
+            WHEN 'Secundaria (Bachillerato) incompleta' THEN 7
+            WHEN 'Primaria completa' THEN 8
+            WHEN 'Primaria incompleta' THEN 9
+            WHEN 'Ninguno' THEN 10
+            ELSE 11
+        END as order_num
     FROM saber_pro
     WHERE fami_educacionpadre NOT IN ('No sabe', 'No Aplica')
     GROUP BY fami_educacionpadre
