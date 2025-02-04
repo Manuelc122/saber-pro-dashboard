@@ -20,11 +20,20 @@ CACHE_SIZE = 32
 def get_db_path():
     if os.environ.get('RENDER'):
         return Path('/opt/render/project/src/data/processed/saber_pro.db')
-    return Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
+    
+    # For local development, construct path relative to the project root
+    current_file = Path(__file__)
+    project_root = current_file.parent.parent.parent
+    return project_root / 'data' / 'processed' / 'saber_pro.db'
 
 class DatabaseConnection:
     def __init__(self):
         self.db_path = get_db_path()
+        if not self.db_path.exists():
+            print(f"Database not found at: {self.db_path}")
+            print(f"Current working directory: {os.getcwd()}")
+            print(f"Absolute path to database: {self.db_path.absolute()}")
+            raise FileNotFoundError(f"Database file not found at {self.db_path}")
         
     def __enter__(self):
         self.conn = sqlite3.connect(str(self.db_path), timeout=QUERY_TIMEOUT)
