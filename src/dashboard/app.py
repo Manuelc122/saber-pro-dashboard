@@ -1,4 +1,6 @@
 from dash import Dash, html, dcc, Input, Output, State
+from dash.exceptions import PreventUpdate
+from dash.ctx import callback_context
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
@@ -8,6 +10,7 @@ import sqlite3
 from functools import lru_cache
 import gc
 import time
+from contextlib import contextmanager
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from pathlib import Path
 
@@ -16,6 +19,22 @@ CHUNK_SIZE = 5000  # Reduced from 10000 for better memory management
 QUERY_TIMEOUT = 30  # seconds
 MAX_ROWS = 100000  # Maximum number of rows to return
 CACHE_SIZE = 32
+MAX_CACHE_ATTEMPTS = 3  # Maximum number of cache attempts before giving up
+
+# Add memory optimization settings
+import gc
+gc.enable()  # Enable garbage collection
+
+# Configure memory-related settings
+def configure_memory_settings():
+    gc.collect()  # Force garbage collection
+    if os.environ.get('RENDER'):
+        # Production settings
+        CHUNK_SIZE = 2500  # Further reduce chunk size in production
+        MAX_ROWS = 50000  # Reduce max rows in production
+    return CHUNK_SIZE, MAX_ROWS
+
+CHUNK_SIZE, MAX_ROWS = configure_memory_settings()
 
 def get_db_path():
     if os.environ.get('RENDER'):
@@ -198,15 +217,36 @@ app = Dash(__name__,
         'https://codepen.io/chriddyp/pen/bWLwgP.css',
         'https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap'
     ],
-    suppress_callback_exceptions=True  # Add this line to suppress callback exceptions
+    suppress_callback_exceptions=True,
+    assets_folder='assets',
+    serve_locally=True,
+    update_title=None,  # Disable the "Updating..." title
+    meta_tags=[
+        {"name": "viewport", "content": "width=device-width, initial-scale=1"}
+    ]
 )
 
-# Add this near the top after app initialization
-server = app.server  # This is needed for production deployment
+# Configure app
+app.config.suppress_callback_exceptions = True
+app.scripts.config.serve_locally = True
+app.css.config.serve_locally = True
+
+# Add this to prevent the "Updating..." message that can cause state issues
+app._favicon = 'assets/favicon.ico'  # Optional: add a favicon
+
+# Ensure the server variable is properly set
+server = app.server
 
 # Add port configuration
 port = int(os.environ.get('PORT', 8051))
 host = '0.0.0.0'
+
+# Configure memory settings for production
+if os.environ.get('RENDER'):
+    # Production optimizations
+    app.scripts.config.serve_locally = True
+    app.css.config.serve_locally = True
+    app.title = 'Análisis Saber Pro'  # Set a static title
 
 # Add memory configuration for production
 if os.environ.get('RENDER'):
@@ -487,288 +527,123 @@ def create_base_graph_layout(title, xaxis_title, yaxis_title, df, show_legend=Fa
 app.layout = html.Div([
     html.H1("Análisis Saber Pro", style=STYLES['title']),
     _db_warning,
-    dcc.Tabs([
-        dcc.Tab(label="Análisis Descriptivo", children=[
-            html.Div([
-                # Dataset Overview Section
-                html.Div([
-                    html.H4("Análisis de Resultados Saber Pro", style=SECTION_TITLE_STYLE),
+    dcc.Loading(
+        id="loading-tabs",
+        type="circle",
+        children=[
+            dcc.Tabs([
+                dcc.Tab(label="Análisis Descriptivo", children=[
                     html.Div([
+                        # Dataset Overview Section
                         html.Div([
-                            html.H5("Descripción General", style={
-                                'color': 'white',
-                                'backgroundColor': '#1976D2',
-                                'padding': '12px',
-                                'marginBottom': '15px',
-                                'borderRadius': '8px 8px 0 0',
-                                'fontWeight': 'bold'
-                            }),
-                            html.P([
-                                "El Saber Pro es el examen de Estado de la calidad de la educación superior en Colombia, ",
-                                "una prueba estandarizada que evalúa las competencias de los estudiantes que están próximos ",
-                                "a graduarse de programas de pregrado."
-                            ], style={
-                                'textAlign': 'justify',
-                                'marginBottom': '15px',
-                                'padding': '0 15px',
-                                'color': '#2c3e50',
-                                'lineHeight': '1.6'
-                            }),
-                        ], style={
-                            'backgroundColor': 'white',
-                            'borderRadius': '8px',
-                            'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
-                            'marginBottom': '20px'
-                        }),
-                        
-                        html.Div([
-                            html.H5("Contenido del Dataset", style={
-                                'color': 'white',
-                                'backgroundColor': '#1976D2',
-                                'padding': '12px',
-                                'marginBottom': '15px',
-                                'borderRadius': '8px 8px 0 0',
-                                'fontWeight': 'bold'
-                            }),
-                            html.P([
-                                "Este dashboard analiza datos del período 2018-2022, incluyendo:"
-                            ], style={
-                                'padding': '0 15px',
-                                'marginBottom': '10px',
-                                'color': '#2c3e50'
-                            }),
-                            html.Ul([
-                                html.Li("Resultados en módulos genéricos (Razonamiento Cuantitativo, Lectura Crítica, Inglés y Competencias Ciudadanas)"),
-                                html.Li("Información socioeconómica detallada de los estudiantes"),
-                                html.Li("Características de las instituciones educativas"),
-                                html.Li("Datos demográficos y contextuales")
-                            ], style={
-                                'paddingRight': '15px',
-                                'paddingLeft': '35px',
-                                'marginBottom': '15px',
-                                'color': '#2c3e50',
-                                'lineHeight': '1.6'
-                            })
-                        ], style={
-                            'backgroundColor': 'white',
-                            'borderRadius': '8px',
-                            'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
-                            'marginBottom': '20px'
-                        }),
-                        
-                        html.Div([
-                            html.H5("Estructura del Dashboard", style={
-                                'color': 'white',
-                                'backgroundColor': '#1976D2',
-                                'padding': '12px',
-                                'marginBottom': '15px',
-                                'borderRadius': '8px 8px 0 0',
-                                'fontWeight': 'bold'
-                            }),
-                            html.P([
-                                "El dashboard está organizado en las siguientes secciones:"
-                            ], style={
-                                'padding': '0 15px',
-                                'marginBottom': '10px',
-                                'color': '#2c3e50'
-                            }),
-                            html.Ul([
-                                html.Li("Resumen Demográfico: Estadísticas generales y distribución por estrato socioeconómico"),
-                                html.Li("Antecedentes Educativos: Nivel educativo de los padres y costos de matrícula"),
-                                html.Li("Características del Hogar: Análisis de recursos y activos familiares"),
-                                html.Li("Características del Estudiante: Información sobre horas de trabajo y otros factores"),
-                                html.Li("Métodos de Pago: Análisis de las formas de financiación educativa")
-                            ], style={
-                                'paddingRight': '15px',
-                                'paddingLeft': '35px',
-                                'marginBottom': '15px',
-                                'color': '#2c3e50',
-                                'lineHeight': '1.6'
-                            })
-                        ], style={
-                            'backgroundColor': 'white',
-                            'borderRadius': '8px',
-                            'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
-                            'marginBottom': '20px'
-                        }),
-                        
-                        html.Div([
-                            html.H5("Objetivo del Análisis", style={
-                                'color': 'white',
-                                'backgroundColor': '#1976D2',
-                                'padding': '12px',
-                                'marginBottom': '15px',
-                                'borderRadius': '8px 8px 0 0',
-                                'fontWeight': 'bold'
-                            }),
-                            html.P([
-                                "Este análisis busca proporcionar insights sobre los factores que influyen en el desempeño académico, ",
-                                "las características socioeconómicas de los estudiantes y las tendencias en la educación superior colombiana. ",
-                                "Los datos presentados permiten identificar patrones, desigualdades y áreas de oportunidad en el sistema educativo."
-                            ], style={
-                                'textAlign': 'justify',
-                                'marginBottom': '15px',
-                                'padding': '0 15px',
-                                'color': '#2c3e50',
-                                'lineHeight': '1.6'
-                            })
-                        ], style={
-                            'backgroundColor': 'white',
-                            'borderRadius': '8px',
-                            'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
-                            'marginBottom': '20px'
-                        })
-                    ], style={
-                        'backgroundColor': '#f8f9fa',
-                        'padding': '20px',
-                        'borderRadius': '10px'
-                    })
-                ], className='card'),
-
-                # Main Demographics Summary
-                html.Div([
-                    html.H4("Resumen Demográfico", style=SECTION_TITLE_STYLE),
-                    html.Div(id='demographic-summary')
-                ], className='card'),
-
-                # Educational Background
-                html.Div([
-                    html.H4("Educación de los Padres", style=SECTION_TITLE_STYLE),
-                    html.Div(id='parents-education-summary')
-                ], className='card'),
-
-                # Educational Costs
-                html.Div([
-                    html.H4("Costos Educativos", style=SECTION_TITLE_STYLE),
-                    html.Div(id='education-costs-summary')
-                ], className='card'),
-
-                # Household Assets
-                html.Div([
-                    html.H4("Características del Hogar", style=SECTION_TITLE_STYLE),
-                    html.Div(id='household-assets-summary')
-                ], className='card'),
-
-                # Student Characteristics
-                html.Div([
-                    html.H4("Características del Estudiante", style=SECTION_TITLE_STYLE),
-                    html.Div(id='student-characteristics-summary')
-                ], className='card')
-            ])
-        ]),
-        dcc.Tab(label="Análisis de Relaciones", children=[
-            html.Div([
-                # Time Performance Section
-                html.Div([
-                    html.H4("Desempeño a lo Largo del Tiempo", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
+                            html.H4("Análisis de Resultados Saber Pro", style=SECTION_TITLE_STYLE),
+                            dcc.Loading(
+                                id="loading-overview",
+                                type="circle",
+                                children=[
+                                    html.Div(id='demographic-summary')
+                                ]
+                            ),
+                            dcc.Loading(
+                                id="loading-parents",
+                                type="circle",
+                                children=[
+                                    html.Div(id='parents-education-summary')
+                                ]
+                            ),
+                            dcc.Loading(
+                                id="loading-costs",
+                                type="circle",
+                                children=[
+                                    html.Div(id='education-costs-summary')
+                                ]
+                            ),
+                            dcc.Loading(
+                                id="loading-assets",
+                                type="circle",
+                                children=[
+                                    html.Div(id='household-assets-summary')
+                                ]
+                            ),
+                            dcc.Loading(
+                                id="loading-characteristics",
+                                type="circle",
+                                children=[
+                                    html.Div(id='student-characteristics-summary')
+                                ]
+                            )
+                        ])
+                    ])
+                ]),
+                dcc.Tab(label="Análisis de Relaciones", children=[
                     html.Div([
-                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='performance-metric',
-                            options=[
-                                {'label': 'Promedio General', 'value': 'avg_score'},
-                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
-                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
-                                {'label': 'Inglés', 'value': 'english_score'},
-                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
-                            ],
-                            value='avg_score',
-                            style={'width': '300px'},
-                            clearable=False
-                        )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
-                    dcc.Graph(id='performance-graph'),
-                ], className='card'),
-                
-                # Socioeconomic Analysis Section
-                html.Div([
-                    html.H4("Desempeño por Estrato Socioeconómico y Género", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='strata-performance-metric',
-                            options=[
-                                {'label': 'Promedio General', 'value': 'avg_score'},
-                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
-                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
-                                {'label': 'Inglés', 'value': 'english_score'},
-                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
-                            ],
-                            value='avg_score',
-                            style={'width': '300px'},
-                            clearable=False
-                        )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
-                    dcc.Graph(id='strata-performance-graph'),
-                ], className='card'),
-                
-                # Parents Education Analysis Section
-                html.Div([
-                    html.H4("Desempeño por Nivel Educativo de los Padres", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='parents-education-metric',  # This ID was missing
-                            options=[
-                                {'label': 'Promedio General', 'value': 'avg_score'},
-                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
-                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
-                                {'label': 'Inglés', 'value': 'english_score'},
-                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
-                            ],
-                            value='avg_score',
-                            style={'width': '300px'},
-                            clearable=False
-                        )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
-                    dcc.Graph(id='mother-education-graph', style={'marginBottom': '20px'}),
-                    dcc.Graph(id='father-education-graph')
-                ], className='card'),
-
-                # Tuition Costs Analysis Section
-                html.Div([
-                    html.H4("Relación entre Costos de Matrícula y Desempeño", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='tuition-performance-metric',
-                            options=[
-                                {'label': 'Promedio General', 'value': 'avg_score'},
-                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
-                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
-                                {'label': 'Inglés', 'value': 'english_score'},
-                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
-                            ],
-                            value='avg_score',
-                            style={'width': '300px'},
-                            clearable=False
+                        dcc.Loading(
+                            id="loading-performance",
+                            type="circle",
+                            children=[
+                                html.Div([
+                                    html.H4("Desempeño a lo Largo del Tiempo", style=SECTION_TITLE_STYLE),
+                                    dcc.Graph(id='performance-graph')
+                                ])
+                            ]
                         ),
-                        html.Label("Tipo de Institución:", style={'marginLeft': '20px', 'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='institution-type',
-                            options=[
-                                {'label': 'Todas', 'value': 'all'},
-                                {'label': 'Oficial', 'value': 'OFICIAL'},
-                                {'label': 'No Oficial', 'value': 'NO OFICIAL'},
-                                {'label': 'Régimen Especial', 'value': 'REGIMEN ESPECIAL'}
-                            ],
-                            value='all',
-                            style={'width': '200px'},
-                            clearable=False
+                        dcc.Loading(
+                            id="loading-strata",
+                            type="circle",
+                            children=[
+                                html.Div([
+                                    html.H4("Desempeño por Estrato", style=SECTION_TITLE_STYLE),
+                                    dcc.Graph(id='strata-performance-graph')
+                                ])
+                            ]
+                        ),
+                        dcc.Loading(
+                            id="loading-education",
+                            type="circle",
+                            children=[
+                                html.Div([
+                                    html.H4("Desempeño por Nivel Educativo", style=SECTION_TITLE_STYLE),
+                                    dcc.Graph(id='mother-education-graph'),
+                                    dcc.Graph(id='father-education-graph')
+                                ])
+                            ]
                         )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
-                    dcc.Graph(id='tuition-performance-graph'),
-                ], className='card')
+                    ])
+                ])
             ])
-        ])
-    ])
+        ]
+    )
 ])
+
+@contextmanager
+def callback_manager():
+    """Context manager for handling callback execution and errors"""
+    try:
+        ctx = callback_context
+        if not ctx.triggered:
+            raise PreventUpdate
+        yield ctx
+    except Exception as e:
+        print(f"Callback error: {str(e)}")
+        return html.Div([
+            html.H4("Error Loading Data", style={'color': 'red'}),
+            html.P("Please try refreshing the page. If the error persists, contact support."),
+            html.Pre(str(e), style={'display': 'none'})
+        ])
+
+def handle_callback_error(func):
+    """Decorator for handling callback errors"""
+    def wrapper(*args, **kwargs):
+        with callback_manager() as ctx:
+            return func(*args, **kwargs)
+    return wrapper
 
 # Callback for Performance Over Time tab
 @app.callback(
     Output('performance-graph', 'figure'),
     [Input('performance-metric', 'value')]
 )
+@handle_callback_error
 def update_performance_graph(metric):
     query = """
     WITH year_data AS (
@@ -935,11 +810,12 @@ app.css.append_css({
     'external_url': 'https://codepen.io/chriddyp/pen/bWLwgP.css'
 })
 
-# Add callbacks for dataset overview
+# Update the callbacks with error handling
 @app.callback(
     Output('demographic-summary', 'children'),
     Input('demographic-summary', 'id')
 )
+@handle_callback_error
 def update_demographic_summary(_):
     # Query for general demographics
     query = """
@@ -1085,7 +961,7 @@ def update_demographic_summary(_):
                             'textAlign': 'right',
                             'borderBottom': '1px solid #e0e0e0'
                         })
-                    ]),
+                    ]),  # Added missing comma
                     html.Tr([
                         html.Td("Puntaje Promedio General", style={
                             'padding': '10px',
@@ -1229,6 +1105,7 @@ def update_demographic_summary(_):
     Output('parents-education-summary', 'children'),
     Input('parents-education-summary', 'id')
 )
+@handle_callback_error
 def update_parents_education_summary(_):
     # Query for parents' education
     query = """
@@ -1473,6 +1350,7 @@ def update_parents_education_summary(_):
     Output('education-costs-summary', 'children'),
     Input('education-costs-summary', 'id')
 )
+@handle_callback_error
 def update_education_costs_summary(_):
     # Query for education costs distribution
     query = """
@@ -1658,6 +1536,7 @@ def update_education_costs_summary(_):
     Output('household-assets-summary', 'children'),
     Input('household-assets-summary', 'id')
 )
+@handle_callback_error
 def update_household_assets_summary(_):
     # Query for household assets
     query = """
@@ -1863,6 +1742,7 @@ def update_household_assets_summary(_):
     Output('student-characteristics-summary', 'children'),
     Input('student-characteristics-summary', 'id')
 )
+@handle_callback_error
 def update_student_characteristics_summary(_):
     # Query for work hours
     work_query = """
@@ -2034,6 +1914,7 @@ def update_student_characteristics_summary(_):
     Output('strata-performance-graph', 'figure'),
     [Input('strata-performance-metric', 'value')]
 )
+@handle_callback_error
 def update_strata_performance_graph(metric):
     # Define the metric mapping
     metric_mapping = {
@@ -2185,6 +2066,7 @@ def update_strata_performance_graph(metric):
      Output('father-education-graph', 'figure')],
     [Input('parents-education-metric', 'value')]
 )
+@handle_callback_error
 def update_parents_education_graphs(metric):
     # Define the metric mapping
     metric_mapping = {
