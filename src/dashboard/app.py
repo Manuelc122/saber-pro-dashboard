@@ -1,6 +1,5 @@
-from dash import Dash, html, dcc, Input, Output, State
+from dash import Dash, html, dcc, Input, Output, State, callback_context
 from dash.exceptions import PreventUpdate
-from dash.ctx import callback_context
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
