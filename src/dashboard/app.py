@@ -230,9 +230,6 @@ app.config.suppress_callback_exceptions = True
 app.scripts.config.serve_locally = True
 app.css.config.serve_locally = True
 
-# Add this to prevent the "Updating..." message that can cause state issues
-app._favicon = 'assets/favicon.ico'  # Optional: add a favicon
-
 # Ensure the server variable is properly set
 server = app.server
 
