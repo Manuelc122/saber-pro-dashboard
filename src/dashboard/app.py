@@ -268,6 +268,20 @@ if os.environ.get('RENDER'):
 port = int(os.environ.get('PORT', 8051))
 host = '0.0.0.0'
 
+# Define database warning message
+_db_path = get_db_path()
+_db_warning = None if _db_path.exists() else html.Div(
+    f"Base de datos no encontrada en {_db_path}. Por favor, ejecute create_database.py primero para crear y poblar la base de datos.",
+    style={
+        'color': 'white',
+        'backgroundColor': '#f44336',
+        'padding': '10px',
+        'textAlign': 'center',
+        'fontFamily': 'Roboto, sans-serif',
+        'marginBottom': '20px'
+    }
+)
+
 # Implement lazy loading for graphs
 app.clientside_callback(
     """
