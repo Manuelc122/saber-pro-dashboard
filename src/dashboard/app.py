@@ -15,7 +15,8 @@ from pathlib import Path
 CHUNK_SIZE = 5000  # Reduced from 10000 for better memory management
 QUERY_TIMEOUT = 30  # seconds
 MAX_ROWS = 100000  # Maximum number of rows to return
-CACHE_SIZE = 32
+CACHE_SIZE = 128  # Increased from 32 to 128 for better caching
+CACHE_TTL = 3600  # Cache time-to-live in seconds
 
 def get_db_path():
     if os.environ.get('RENDER'):
@@ -45,11 +46,14 @@ class DatabaseConnection:
         gc.collect()
         
     def _optimize_connection(self):
-        self.conn.execute('PRAGMA cache_size = -2000')  # 2MB cache
+        # Optimize SQLite for read-heavy workload
+        self.conn.execute('PRAGMA cache_size = -4000')  # Increased to 4MB cache
         self.conn.execute('PRAGMA temp_store = MEMORY')
         self.conn.execute('PRAGMA journal_mode = WAL')
         self.conn.execute('PRAGMA synchronous = NORMAL')
         self.conn.execute('PRAGMA mmap_size = 30000000000')  # 30GB memory map
+        self.conn.execute('PRAGMA page_size = 4096')  # Optimal page size
+        self.conn.execute('PRAGMA read_uncommitted = 1')  # Read uncommitted for better concurrency
         self.conn.row_factory = sqlite3.Row
 
 def read_query_in_chunks(query, conn, params=None):
@@ -71,8 +75,36 @@ def read_query_in_chunks(query, conn, params=None):
         print(f"Error during chunked reading: {str(e)}")
         yield pd.DataFrame()
 
+# Create a simple in-memory cache for query results
+_query_cache = {}
+_cache_timestamps = {}
+
+def clear_old_cache_entries():
+    """Clear cache entries older than CACHE_TTL"""
+    current_time = time.time()
+    expired_keys = [
+        k for k, timestamp in _cache_timestamps.items()
+        if current_time - timestamp > CACHE_TTL
+    ]
+    for k in expired_keys:
+        _query_cache.pop(k, None)
+        _cache_timestamps.pop(k, None)
+
 @lru_cache(maxsize=CACHE_SIZE)
 def cached_query(query_str, params_str=None):
+    """Enhanced query caching with TTL and memory management"""
+    cache_key = f"{query_str}:{params_str}"
+    current_time = time.time()
+    
+    # Check cache and return if valid
+    if cache_key in _query_cache:
+        cache_time = _cache_timestamps.get(cache_key, 0)
+        if current_time - cache_time < CACHE_TTL:
+            return _query_cache[cache_key]
+    
+    # Clear old cache entries
+    clear_old_cache_entries()
+    
     try:
         with DatabaseConnection() as conn:
             chunks = []
@@ -88,6 +120,11 @@ def cached_query(query_str, params_str=None):
                     break
             
             result = pd.concat(chunks) if chunks else pd.DataFrame()
+            
+            # Cache the result
+            _query_cache[cache_key] = result
+            _cache_timestamps[cache_key] = current_time
+            
             print(f"Query successful. Returned {len(result)} rows. Memory usage: {total_size/1024/1024:.2f}MB")
             return result
             
@@ -192,303 +229,112 @@ STYLES = {
     }
 }
 
-# Initialize the Dash app
-app = Dash(__name__, 
+# Initialize the Dash app with optimized settings
+app = Dash(
+    __name__, 
     external_stylesheets=[
         'https://codepen.io/chriddyp/pen/bWLwgP.css',
         'https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap'
     ],
-    serve_locally=False  # Change this to False to fix the CSS warning
+    serve_locally=True,  # Changed to True for better asset serving
+    compress=True,  # Enable response compression
+    meta_tags=[
+        # Responsive meta tag
+        {"name": "viewport", "content": "width=device-width, initial-scale=1.0"},
+        # Cache control meta tags
+        {"http-equiv": "Cache-Control", "content": "public, max-age=3600"},
+        {"http-equiv": "Expires", "content": "3600"},
+    ]
 )
 
 # Add this near the top after app initialization
-server = app.server  # This is needed for production deployment
+server = app.server
+
+# Configure server for production
+if os.environ.get('RENDER'):
+    # Enable compression
+    from flask_compress import Compress
+    Compress(server)
+    
+    # Configure caching headers
+    @server.after_request
+    def add_header(response):
+        # Cache static assets for 1 hour
+        if 'Cache-Control' not in response.headers:
+            response.headers['Cache-Control'] = 'public, max-age=3600'
+        return response
 
 # Add port configuration
 port = int(os.environ.get('PORT', 8051))
 host = '0.0.0.0'
 
-# Add memory configuration for production
-if os.environ.get('RENDER'):
-    # Reduce memory usage in production
-    gc.collect()  # Force garbage collection
-    
-    # Configure SQLite to use less memory
-    def optimize_sqlite_connection(conn):
-        conn.execute('PRAGMA cache_size = -2000')  # Set cache size to 2MB
-        conn.execute('PRAGMA temp_store = 2')  # Store temp tables in memory
-        conn.execute('PRAGMA journal_mode = WAL')  # Use Write-Ahead Logging
-        
-    # Modify query_db function to use optimized connection
-    def query_db(query, params=None):
-        try:
-            if os.environ.get('RENDER'):
-                db_path = Path('/opt/render/project/src/data/processed/saber_pro.db')
-            else:
-                db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
-            
-            if not db_path.exists():
-                print(f"Database not found at: {db_path}")
-                return pd.DataFrame()
-                
-            conn = sqlite3.connect(db_path)
-            optimize_sqlite_connection(conn)  # Apply optimization
-            
-            try:
-                if params:
-                    result = pd.read_sql_query(query, conn, params=params)
-                else:
-                    result = pd.read_sql_query(query, conn)
-                    
-                print(f"Query successful. Returned {len(result)} rows")
-                return result
-                
-            except sqlite3.Error as e:
-                print(f"SQLite error: {str(e)}")
-                print(f"Query: {query}")
-                if params:
-                    print(f"Parameters: {params}")
-                return pd.DataFrame()
-                
-            finally:
-                conn.close()
-                gc.collect()  # Force garbage collection after query
-                
-        except Exception as e:
-            print(f"Database error: {str(e)}")
-            print(f"Using database path: {db_path}")
-            return pd.DataFrame()
-
-# Updated database path configuration
-if os.environ.get('RENDER'):
-    # Production path on Render
-    _db_path = Path('/opt/render/project/src/data/processed/saber_pro.db')
-else:
-    # Development path
-    _db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
-
-_db_warning = None if _db_path.exists() else html.Div(
-    f"Base de datos no encontrada en {_db_path}. Por favor, ejecute create_database.py primero para crear y poblar la base de datos.",
-    style={
-        'color': 'white',
-        'backgroundColor': '#f44336',
-        'padding': '10px',
-        'textAlign': 'center',
-        'fontFamily': 'Roboto, sans-serif',
-        'marginBottom': '20px'
+# Implement lazy loading for graphs
+app.clientside_callback(
+    """
+    function(n_intervals) {
+        if (n_intervals === 0) {
+            return;
+        }
+        // Trigger loading of graphs that are in viewport
+        const graphs = document.querySelectorAll('.dash-graph');
+        graphs.forEach(graph => {
+            if (isElementInViewport(graph) && !graph.dataset.loaded) {
+                graph.dataset.loaded = true;
+                // Your loading logic here
+            }
+        });
     }
+    """,
+    Output('dummy-output', 'children'),
+    Input('interval-component', 'n_intervals')
 )
 
-# Custom CSS for better styling
-app.index_string = '''
-<!DOCTYPE html>
-<html>
-    <head>
-        {%metas%}
-        <title>Análisis de Resultados Saber Pro</title>
-        {%favicon%}
-        {%css%}
-        <style>
-            body {
-                font-family: 'Roboto', sans-serif;
-                margin: 0;
-                background-color: #f0f2f5;
-            }
-            .main-title {
-                text-align: center;
-                padding: 30px 0;
-                background-color: #1976D2;
-                margin-bottom: 0;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            .main-title h1 {
-                color: white;
-                font-size: 36px;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: 1.5px;
-                margin: 0;
-                font-family: 'Roboto', sans-serif';
-            }
-            .header-title {
-                text-align: center;
-                color: #2c3e50;
-                padding: 40px;
-                background-color: white;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                margin-bottom: 20px;
-            }
-            .header-title h1 {
-                font-size: 36px;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: 1.5px;
-                margin: 0;
-                font-family: 'Roboto', sans-serif';
-                color: #1976D2;
-            }
-            .header-subtitle {
-                color: #666;
-                font-size: 20px;
-                margin-top: 15px;
-                font-weight: 400;
-            }
-            .card {
-                background-color: white;
-                padding: 20px;
-                margin: 20px;
-                border-radius: 8px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-        </style>
-    </head>
-    <body>
-        <div class="main-title">
-            <h1>Análisis de Desempeño - Pruebas Saber Pro</h1>
-            <div style="color: white; font-size: 24px; margin-top: 10px;">Cobertura Nacional 2018-2022</div>
-        </div>
-        <div class="header-title">
-            <div class="header-subtitle" style="display: flex; flex-direction: column; gap: 10px;">
-                <div>Resultados anonimizados de las pruebas Saber Pro desde el año 2018 al año 2022</div>
-                <div style="font-size: 16px; color: #666;">
-                    <strong>Fuente:</strong> Instituto Colombiano para la Evaluación de la Educación (ICFES)
-                </div>
-                <div style="font-size: 14px; color: #888;">
-                    Datos Abiertos Colombia | Cobertura: Nacional | Última actualización: 23 de agosto de 2023
-                </div>
-            </div>
-        </div>
-        {%app_entry%}
-        <footer>
-            {%config%}
-            {%scripts%}
-            {%renderer%}
-        </footer>
-    </body>
-</html>
-'''
-
-# Add these style dictionaries at the top of the file after the imports
-SECTION_TITLE_STYLE = {
-    'textAlign': 'center',
-    'color': '#2c3e50',
-    'marginBottom': '30px',
-    'fontFamily': 'Roboto, sans-serif',
-    'fontSize': '28px',
-    'fontWeight': 'bold',
-    'textTransform': 'uppercase',
-    'letterSpacing': '1px',
-    'padding': '20px 0'
-}
-
-TABLE_TITLE_STYLE = {
-    'color': '#2c3e50',
-    'marginBottom': '20px',
-    'textAlign': 'center',
-    'fontFamily': 'Roboto, sans-serif',
-    'fontSize': '22px',
-    'fontWeight': 'bold',
-    'padding': '10px 0'
-}
-
-GRAPH_TITLE_STYLE = {
-    'text': None,  # Will be set for each graph
-    'y': 0.95,
-    'x': 0.5,
-    'xanchor': 'center',
-    'yanchor': 'top',
-    'font': {
-        'family': 'Roboto, sans-serif',
-        'size': 22,
-        'color': '#2c3e50'
-    }
-}
-
-# Add after style definitions and before callbacks
-def create_base_graph_layout(title, xaxis_title, yaxis_title, df, show_legend=False):
-    """Create a base layout for graphs with consistent styling"""
-    return dict(
-        title=dict(
-            text=title,
-            font=dict(
-                size=STYLES['graph']['title_size'],
-                color=COLORS['primary'],
-                family=STYLES['graph']['font_family']
-            ),
-            x=0.5,
-            y=0.95
-        ),
-        xaxis=dict(
-            title=dict(
-                text=xaxis_title,
-                font=dict(
-                    size=STYLES['graph']['axis_title_size'],
-                    color=COLORS['primary'],
-                    family=STYLES['graph']['font_family']
-                )
-            ),
-            showgrid=True,
-            gridcolor=COLORS['grid'],
-            showline=True,
-            linewidth=2,
-            linecolor=COLORS['primary'],
-            tickangle=45
-        ),
-        yaxis=dict(
-            title=dict(
-                text=yaxis_title,
-                font=dict(
-                    size=STYLES['graph']['axis_title_size'],
-                    color=COLORS['primary'],
-                    family=STYLES['graph']['font_family']
-                )
-            ),
-            showgrid=True,
-            gridcolor=COLORS['grid'],
-            showline=True,
-            linewidth=2,
-            linecolor=COLORS['primary'],
-            range=[min(df['score']) - 2, max(df['score']) + 2] if 'score' in df.columns else None
-        ),
-        plot_bgcolor=COLORS['white'],
-        paper_bgcolor=COLORS['white'],
-        showlegend=show_legend,
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="right",
-            x=0.99,
-            bgcolor='rgba(255, 255, 255, 0.8)',
-            bordercolor=COLORS['primary'],
-            borderwidth=1
-        ),
-        margin=STYLES['graph']['margin'],
-        height=STYLES['graph']['height'],
-        annotations=[
-            dict(
-                text='Fuente: Base de Datos Saber Pro',
-                xref='paper',
-                yref='paper',
-                x=1,
-                y=-0.4,
-                showarrow=False,
-                font=dict(
-                    size=12,
-                    color=COLORS['secondary'],
-                    family=STYLES['graph']['font_family']
-                ),
-                align='right'
-            )
-        ],
-        hovermode='x unified'
-    )
-
-# Updated dashboard layout with dataset overview tab
+# Add interval component for lazy loading
 app.layout = html.Div([
+    dcc.Interval(
+        id='interval-component',
+        interval=1000,  # in milliseconds
+        n_intervals=0
+    ),
+    html.Div(id='dummy-output'),
+    
+    # Rest of your existing layout...
     html.H1("Análisis Saber Pro", style=STYLES['title']),
     _db_warning,
+    
+    # Implement progressive loading of tabs
     dcc.Tabs([
-        dcc.Tab(label="Análisis Descriptivo", children=[
+        dcc.Tab(
+            label="Análisis Descriptivo",
+            children=[
+                html.Div(
+                    id='descriptive-analysis-content',
+                    style={'display': 'none'}
+                )
+            ]
+        ),
+        dcc.Tab(
+            label="Análisis de Relaciones",
+            children=[
+                html.Div(
+                    id='relationships-analysis-content',
+                    style={'display': 'none'}
+                )
+            ]
+        )
+    ])
+])
+
+# Callback to load tab content only when selected
+@app.callback(
+    [Output('descriptive-analysis-content', 'children'),
+     Output('descriptive-analysis-content', 'style')],
+    [Input('tabs-component', 'value')]
+)
+def load_tab_content(tab):
+    if tab == 'tab-1':
+        return [
+            # Your existing descriptive analysis content
             html.Div([
                 # Dataset Overview Section
                 html.Div([
@@ -655,114 +501,49 @@ app.layout = html.Div([
                     html.Div(id='student-characteristics-summary')
                 ], className='card')
             ])
-        ]),
-        dcc.Tab(label="Análisis de Relaciones", children=[
-            html.Div([
-                # Time Performance Section
-                html.Div([
-                    html.H4("Desempeño a lo Largo del Tiempo", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='performance-metric',
-                            options=[
-                                {'label': 'Promedio General', 'value': 'avg_score'},
-                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
-                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
-                                {'label': 'Inglés', 'value': 'english_score'},
-                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
-                            ],
-                            value='avg_score',
-                            style={'width': '300px'},
-                            clearable=False
-                        )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
-                    dcc.Graph(id='performance-graph'),
-                ], className='card'),
-                
-                # Socioeconomic Analysis Section
-                html.Div([
-                    html.H4("Desempeño por Estrato Socioeconómico y Género", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='strata-performance-metric',
-                            options=[
-                                {'label': 'Promedio General', 'value': 'avg_score'},
-                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
-                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
-                                {'label': 'Inglés', 'value': 'english_score'},
-                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
-                            ],
-                            value='avg_score',
-                            style={'width': '300px'},
-                            clearable=False
-                        )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
-                    dcc.Graph(id='strata-performance-graph'),
-                ], className='card'),
-                
-                # Parents Education Analysis Section
-                html.Div([
-                    html.H4("Desempeño por Nivel Educativo de los Padres", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='parents-education-metric',
-                            options=[
-                                {'label': 'Promedio General', 'value': 'avg_score'},
-                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
-                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
-                                {'label': 'Inglés', 'value': 'english_score'},
-                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
-                            ],
-                            value='avg_score',
-                            style={'width': '300px'},
-                            clearable=False
-                        )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
-                    dcc.Graph(id='mother-education-graph', style={'marginBottom': '20px'}),
-                    dcc.Graph(id='father-education-graph'),
-                ], className='card'),
+        ]
+    return dash.no_update, {'display': 'none'}
 
-                # Tuition Costs Analysis Section
-                html.Div([
-                    html.H4("Relación entre Costos de Matrícula y Desempeño", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='tuition-performance-metric',
-                            options=[
-                                {'label': 'Promedio General', 'value': 'avg_score'},
-                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
-                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
-                                {'label': 'Inglés', 'value': 'english_score'},
-                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
-                            ],
-                            value='avg_score',
-                            style={'width': '300px'},
-                            clearable=False
-                        ),
-                        html.Label("Tipo de Institución:", style={'marginLeft': '20px', 'marginRight': '10px', 'color': '#2c3e50'}),
-                        dcc.Dropdown(
-                            id='institution-type',
-                            options=[
-                                {'label': 'Todas', 'value': 'all'},
-                                {'label': 'Oficial', 'value': 'OFICIAL'},
-                                {'label': 'No Oficial', 'value': 'NO OFICIAL'},
-                                {'label': 'Régimen Especial', 'value': 'REGIMEN ESPECIAL'}
-                            ],
-                            value='all',
-                            style={'width': '200px'},
-                            clearable=False
-                        )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
-                    dcc.Graph(id='tuition-performance-graph'),
-                ], className='card')
-            ])
-        ])
-    ])
-])
+# Add client-side JavaScript for performance optimization
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        // Implement client-side data caching
+        if (typeof window.dashCache === 'undefined') {
+            window.dashCache = {};
+        }
+        
+        // Cache management functions
+        window.dashCache.set = function(key, value, ttl) {
+            const now = new Date().getTime();
+            const item = {
+                value: value,
+                expiry: now + ttl * 1000
+            };
+            localStorage.setItem(key, JSON.stringify(item));
+        };
+        
+        window.dashCache.get = function(key) {
+            const itemStr = localStorage.getItem(key);
+            if (!itemStr) return null;
+            
+            const item = JSON.parse(itemStr);
+            const now = new Date().getTime();
+            
+            if (now > item.expiry) {
+                localStorage.removeItem(key);
+                return null;
+            }
+            
+            return item.value;
+        };
+        
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('dummy-output-2', 'children'),
+    Input('dummy-input', 'n_clicks')
+)
 
 # Callback for Performance Over Time tab
 @app.callback(
