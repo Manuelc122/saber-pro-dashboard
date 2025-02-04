@@ -528,7 +528,7 @@ app.layout = html.Div([
                 
                 # Socioeconomic Analysis Section
                 html.Div([
-                    html.H4("Desempeño por Estrato Socioeconómico", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
+                    html.H4("Desempeño por Estrato Socioeconómico y Género", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
                     html.Div([
                         html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
                         dcc.Dropdown(
@@ -1976,17 +1976,19 @@ def update_strata_performance_graph(metric):
         'citizenship_score': 'mod_competen_ciudada_punt'
     }
     
-    # Query to get average scores by strata
+    # Query to get average scores by strata and gender
     query = f"""
     SELECT 
         fami_estratovivienda as estrato,
+        estu_genero as genero,
         ROUND(AVG({metric_mapping[metric]}), 2) as score,
         COUNT(*) as count
     FROM saber_pro
     WHERE fami_estratovivienda != 'Sin estrato'
-    GROUP BY fami_estratovivienda
+    GROUP BY fami_estratovivienda, estu_genero
     ORDER BY 
-        CAST(REPLACE(fami_estratovivienda, 'Estrato ', '') AS INTEGER)
+        CAST(REPLACE(fami_estratovivienda, 'Estrato ', '') AS INTEGER),
+        estu_genero
     """
     
     df = query_db(query)
@@ -1994,7 +1996,7 @@ def update_strata_performance_graph(metric):
     if df.empty:
         fig = go.Figure()
         fig.add_annotation(
-            text="No hay datos disponibles para el análisis por estrato",
+            text="No hay datos disponibles para el análisis por estrato y género",
             xref="paper",
             yref="paper",
             x=0.5,
@@ -2016,25 +2018,36 @@ def update_strata_performance_graph(metric):
     # Create figure
     fig = go.Figure()
     
-    # Add bars for scores
-    fig.add_trace(go.Bar(
-        x=df['estrato'],
-        y=df['score'],
-        text=[f'{score:.1f}' for score in df['score']],
-        textposition='auto',
-        marker_color='#1976D2',
-        name='Puntaje Promedio',
-        hovertemplate="<b>%{x}</b><br>" +
-                     "Puntaje: %{y:.1f}<br>" +
-                     "Estudiantes: %{customdata:,.0f}<br>" +
-                     "<extra></extra>",
-        customdata=df['count']
-    ))
+    # Add lines for each gender
+    for gender, color, name in [('M', '#1976D2', 'Hombres'), ('F', '#E91E63', 'Mujeres')]:
+        gender_data = df[df['genero'] == gender]
+        
+        fig.add_trace(go.Scatter(
+            x=gender_data['estrato'],
+            y=gender_data['score'],
+            name=name,
+            mode='lines+markers+text',
+            text=[f'{score:.1f}' for score in gender_data['score']],
+            textposition='top center',
+            textfont=dict(size=12, color=color, family='Roboto, sans-serif'),
+            line=dict(color=color, width=3),
+            marker=dict(
+                size=8,
+                color=color,
+                line=dict(color='white', width=2)
+            ),
+            hovertemplate="<b>%{x}</b><br>" +
+                         f"{name}<br>" +
+                         "Puntaje: %{y:.1f}<br>" +
+                         "Estudiantes: %{customdata:,.0f}<br>" +
+                         "<extra></extra>",
+            customdata=gender_data['count']
+        ))
     
     # Update layout
     fig.update_layout(
         title=dict(
-            text=f'Relación entre Estrato Socioeconómico y {metric_translations[metric]}',
+            text=f'Relación entre Estrato Socioeconómico, Género y {metric_translations[metric]}',
             font=dict(size=22, color='#2c3e50', family='Roboto, sans-serif'),
             x=0.5,
             y=0.95
@@ -2064,7 +2077,16 @@ def update_strata_performance_graph(metric):
         ),
         plot_bgcolor='white',
         paper_bgcolor='white',
-        showlegend=False,
+        showlegend=True,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="right",
+            x=0.99,
+            bgcolor='rgba(255, 255, 255, 0.8)',
+            bordercolor='#2c3e50',
+            borderwidth=1
+        ),
         margin=dict(l=60, r=60, t=100, b=60),
         annotations=[
             dict(
