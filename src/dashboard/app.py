@@ -7,64 +7,107 @@ import os
 import sqlite3
 from functools import lru_cache
 import gc
+import time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from pathlib import Path
 
-# Initialize connection pool
-def create_connection():
+# Constants for optimization
+CHUNK_SIZE = 5000  # Reduced from 10000 for better memory management
+QUERY_TIMEOUT = 30  # seconds
+MAX_ROWS = 100000  # Maximum number of rows to return
+CACHE_SIZE = 32
+
+def get_db_path():
     if os.environ.get('RENDER'):
-        db_path = Path('/opt/render/project/src/data/processed/saber_pro.db')
-    else:
-        db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
+        return Path('/opt/render/project/src/data/processed/saber_pro.db')
+    return Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
+
+class DatabaseConnection:
+    def __init__(self):
+        self.db_path = get_db_path()
+        
+    def __enter__(self):
+        self.conn = sqlite3.connect(str(self.db_path), timeout=QUERY_TIMEOUT)
+        self._optimize_connection()
+        return self.conn
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.conn.close()
+        gc.collect()
+        
+    def _optimize_connection(self):
+        self.conn.execute('PRAGMA cache_size = -2000')  # 2MB cache
+        self.conn.execute('PRAGMA temp_store = MEMORY')
+        self.conn.execute('PRAGMA journal_mode = WAL')
+        self.conn.execute('PRAGMA synchronous = NORMAL')
+        self.conn.execute('PRAGMA mmap_size = 30000000000')  # 30GB memory map
+        self.conn.row_factory = sqlite3.Row
+
+def read_query_in_chunks(query, conn, params=None):
+    total_rows = 0
+    start_time = time.time()
     
-    conn = sqlite3.connect(db_path)
-    conn.execute('PRAGMA cache_size = -2000')  # 2MB cache
-    conn.execute('PRAGMA temp_store = MEMORY')
-    conn.execute('PRAGMA journal_mode = WAL')
-    conn.execute('PRAGMA synchronous = NORMAL')
-    conn.execute('PRAGMA mmap_size = 30000000000')  # 30GB memory map
-    conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        for chunk in pd.read_sql_query(query, conn, params=params, chunksize=CHUNK_SIZE):
+            total_rows += len(chunk)
+            if total_rows > MAX_ROWS:
+                print(f"Query exceeded maximum row limit of {MAX_ROWS}")
+                break
+            if time.time() - start_time > QUERY_TIMEOUT:
+                print(f"Query timeout after {QUERY_TIMEOUT} seconds")
+                break
+            yield chunk
+            gc.collect()  # Clean up after each chunk
+    except Exception as e:
+        print(f"Error during chunked reading: {str(e)}")
+        yield pd.DataFrame()
 
-# Implement chunked reading for large queries
-def read_query_in_chunks(query, conn, chunksize=10000):
-    for chunk in pd.read_sql_query(query, conn, chunksize=chunksize):
-        yield chunk
-
-# Cache query results
-@lru_cache(maxsize=32)
+@lru_cache(maxsize=CACHE_SIZE)
 def cached_query(query_str, params_str=None):
     try:
-        conn = create_connection()
-        try:
+        with DatabaseConnection() as conn:
             chunks = []
-            for chunk in read_query_in_chunks(query_str, conn):
+            total_size = 0
+            
+            for chunk in read_query_in_chunks(query_str, conn, params_str):
                 chunks.append(chunk)
-                # Force garbage collection after each chunk
-                gc.collect()
+                total_size += chunk.memory_usage(deep=True).sum()
+                
+                # Break if memory usage exceeds 500MB
+                if total_size > 500 * 1024 * 1024:  # 500MB in bytes
+                    print("Query result exceeded memory limit")
+                    break
             
             result = pd.concat(chunks) if chunks else pd.DataFrame()
-            print(f"Query successful. Returned {len(result)} rows")
+            print(f"Query successful. Returned {len(result)} rows. Memory usage: {total_size/1024/1024:.2f}MB")
             return result
-            
-        except sqlite3.Error as e:
-            print(f"SQLite error: {str(e)}")
-            print(f"Query: {query_str}")
-            return pd.DataFrame()
-            
-        finally:
-            conn.close()
-            gc.collect()
             
     except Exception as e:
         print(f"Database error: {str(e)}")
         return pd.DataFrame()
 
-# Replace query_db with optimized version
 def query_db(query, params=None):
+    """
+    Execute a database query with optimizations for memory and performance.
+    
+    Args:
+        query (str): SQL query to execute
+        params (dict, optional): Query parameters
+        
+    Returns:
+        pd.DataFrame: Query results
+    """
     # Convert params to string for caching
     params_str = str(params) if params else None
-    return cached_query(query, params_str)
+    
+    try:
+        return cached_query(query, params_str)
+    except Exception as e:
+        print(f"Error executing query: {str(e)}")
+        print(f"Query: {query}")
+        if params:
+            print(f"Parameters: {params}")
+        return pd.DataFrame()
 
 # Initialize the Dash app
 app = Dash(__name__, 
