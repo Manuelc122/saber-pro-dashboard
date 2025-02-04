@@ -546,6 +546,29 @@ app.layout = html.Div([
                         )
                     ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
                     dcc.Graph(id='strata-performance-graph'),
+                ], className='card'),
+                
+                # Parents Education Analysis Section
+                html.Div([
+                    html.H4("Desempeño por Nivel Educativo de los Padres", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
+                    html.Div([
+                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
+                        dcc.Dropdown(
+                            id='parents-education-metric',
+                            options=[
+                                {'label': 'Promedio General', 'value': 'avg_score'},
+                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
+                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
+                                {'label': 'Inglés', 'value': 'english_score'},
+                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
+                            ],
+                            value='avg_score',
+                            style={'width': '300px'},
+                            clearable=False
+                        )
+                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
+                    dcc.Graph(id='mother-education-graph', style={'marginBottom': '20px'}),
+                    dcc.Graph(id='father-education-graph'),
                 ], className='card')
             ])
         ])
@@ -2109,6 +2132,163 @@ def update_strata_performance_graph(metric):
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(189, 195, 199, 0.2)')
     
     return fig
+
+# Add new callbacks for parents' education graphs
+@app.callback(
+    [Output('mother-education-graph', 'figure'),
+     Output('father-education-graph', 'figure')],
+    [Input('parents-education-metric', 'value')]
+)
+def update_parents_education_graphs(metric):
+    # Define the metric mapping
+    metric_mapping = {
+        'avg_score': '(mod_razona_cuantitat_punt + mod_lectura_critica_punt + mod_ingles_punt + mod_competen_ciudada_punt)/4.0',
+        'math_score': 'mod_razona_cuantitat_punt',
+        'reading_score': 'mod_lectura_critica_punt',
+        'english_score': 'mod_ingles_punt',
+        'citizenship_score': 'mod_competen_ciudada_punt'
+    }
+    
+    # Education level order
+    education_order = """
+    CASE education_level
+        WHEN 'Postgrado' THEN 1
+        WHEN 'Educación profesional completa' THEN 2
+        WHEN 'Educación profesional incompleta' THEN 3
+        WHEN 'Técnica o tecnológica completa' THEN 4
+        WHEN 'Técnica o tecnológica incompleta' THEN 5
+        WHEN 'Secundaria (Bachillerato) completa' THEN 6
+        WHEN 'Secundaria (Bachillerato) incompleta' THEN 7
+        WHEN 'Primaria completa' THEN 8
+        WHEN 'Primaria incompleta' THEN 9
+        WHEN 'Ninguno' THEN 10
+        ELSE 11
+    END
+    """
+    
+    # Query for mother's education
+    mother_query = f"""
+    SELECT 
+        fami_educacionmadre as education_level,
+        ROUND(AVG({metric_mapping[metric]}), 2) as score,
+        COUNT(*) as count,
+        {education_order} as order_num
+    FROM saber_pro
+    WHERE fami_educacionmadre NOT IN ('No sabe', 'No Aplica')
+    GROUP BY fami_educacionmadre
+    ORDER BY order_num
+    """
+    
+    # Query for father's education
+    father_query = f"""
+    SELECT 
+        fami_educacionpadre as education_level,
+        ROUND(AVG({metric_mapping[metric]}), 2) as score,
+        COUNT(*) as count,
+        {education_order} as order_num
+    FROM saber_pro
+    WHERE fami_educacionpadre NOT IN ('No sabe', 'No Aplica')
+    GROUP BY fami_educacionpadre
+    ORDER BY order_num
+    """
+    
+    mother_df = query_db(mother_query)
+    father_df = query_db(father_query)
+    
+    # Spanish translations for metric names
+    metric_translations = {
+        'math_score': 'Razonamiento Cuantitativo',
+        'reading_score': 'Lectura Crítica',
+        'english_score': 'Inglés',
+        'citizenship_score': 'Competencias Ciudadanas',
+        'avg_score': 'Promedio General'
+    }
+    
+    def create_education_figure(df, parent_type):
+        fig = go.Figure()
+        
+        # Add line plot
+        fig.add_trace(go.Scatter(
+            x=df['education_level'],
+            y=df['score'],
+            mode='lines+markers+text',
+            text=[f'{score:.1f}' for score in df['score']],
+            textposition='top center',
+            textfont=dict(size=12, color='#1976D2', family='Roboto, sans-serif'),
+            line=dict(color='#1976D2', width=3),
+            marker=dict(
+                size=8,
+                color='#1976D2',
+                line=dict(color='white', width=2)
+            ),
+            hovertemplate="<b>%{x}</b><br>" +
+                         "Puntaje: %{y:.1f}<br>" +
+                         "Estudiantes: %{customdata:,.0f}<br>" +
+                         "<extra></extra>",
+            customdata=df['count']
+        ))
+        
+        parent_name = "Madre" if parent_type == "mother" else "Padre"
+        
+        # Update layout
+        fig.update_layout(
+            title=dict(
+                text=f'Relación entre Nivel Educativo de la {parent_name} y {metric_translations[metric]}',
+                font=dict(size=22, color='#2c3e50', family='Roboto, sans-serif'),
+                x=0.5,
+                y=0.95
+            ),
+            xaxis=dict(
+                title=dict(
+                    text='Nivel Educativo',
+                    font=dict(size=14, color='#2c3e50', family='Roboto, sans-serif')
+                ),
+                showgrid=True,
+                gridcolor='rgba(189, 195, 199, 0.4)',
+                showline=True,
+                linewidth=2,
+                linecolor='#2c3e50',
+                tickangle=45
+            ),
+            yaxis=dict(
+                title=dict(
+                    text='Puntaje Promedio',
+                    font=dict(size=14, color='#2c3e50', family='Roboto, sans-serif')
+                ),
+                showgrid=True,
+                gridcolor='rgba(189, 195, 199, 0.4)',
+                showline=True,
+                linewidth=2,
+                linecolor='#2c3e50',
+                range=[min(df['score']) - 2, max(df['score']) + 2]
+            ),
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            showlegend=False,
+            margin=dict(l=60, r=60, t=100, b=150),
+            height=700,
+            annotations=[
+                dict(
+                    text='Fuente: Base de Datos Saber Pro',
+                    xref='paper',
+                    yref='paper',
+                    x=1,
+                    y=-0.4,
+                    showarrow=False,
+                    font=dict(size=12, color='#7f8c8d', family='Roboto, sans-serif'),
+                    align='right'
+                )
+            ],
+            hovermode='x unified'
+        )
+        
+        # Add a subtle grid pattern
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(189, 195, 199, 0.2)')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(189, 195, 199, 0.2)')
+        
+        return fig
+    
+    return create_education_figure(mother_df, "mother"), create_education_figure(father_df, "father")
 
 if __name__ == '__main__':
     app.run_server(debug=True, host=host, port=port) 
