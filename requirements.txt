@@ -6,8 +6,7 @@ flask==3.0.0
 flask-compress==1.14
 pandas==2.1.4
 plotly==5.18.0
-numpy==1.26.2
-sqlite3==2.6.0
+numpy>=1.21.0
 gunicorn==21.2.0
 tqdm==4.66.1
 python-dotenv==1.0.0 
