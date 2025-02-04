@@ -4,8 +4,8 @@ import plotly.graph_objects as go
 import pandas as pd
 import sys
 import os
+import sqlite3
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from src.data_processing import query_db
 from pathlib import Path
 
 # Initialize the Dash app
@@ -13,7 +13,8 @@ app = Dash(__name__,
     external_stylesheets=[
         'https://codepen.io/chriddyp/pen/bWLwgP.css',
         'https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap'
-    ]
+    ],
+    serve_locally=False  # Change this to False to fix the CSS warning
 )
 
 # Add this near the top after app initialization
@@ -22,6 +23,58 @@ server = app.server  # This is needed for production deployment
 # Add port configuration
 port = int(os.environ.get('PORT', 8051))
 host = '0.0.0.0'
+
+# Add memory configuration for production
+if os.environ.get('RENDER'):
+    # Reduce memory usage in production
+    import gc
+    gc.collect()  # Force garbage collection
+    
+    # Configure SQLite to use less memory
+    def optimize_sqlite_connection(conn):
+        conn.execute('PRAGMA cache_size = -2000')  # Set cache size to 2MB
+        conn.execute('PRAGMA temp_store = 2')  # Store temp tables in memory
+        conn.execute('PRAGMA journal_mode = WAL')  # Use Write-Ahead Logging
+        
+    # Modify query_db function to use optimized connection
+    def query_db(query, params=None):
+        try:
+            if os.environ.get('RENDER'):
+                db_path = Path('/opt/render/project/src/data/processed/saber_pro.db')
+            else:
+                db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
+            
+            if not db_path.exists():
+                print(f"Database not found at: {db_path}")
+                return pd.DataFrame()
+                
+            conn = sqlite3.connect(db_path)
+            optimize_sqlite_connection(conn)  # Apply optimization
+            
+            try:
+                if params:
+                    result = pd.read_sql_query(query, conn, params=params)
+                else:
+                    result = pd.read_sql_query(query, conn)
+                    
+                print(f"Query successful. Returned {len(result)} rows")
+                return result
+                
+            except sqlite3.Error as e:
+                print(f"SQLite error: {str(e)}")
+                print(f"Query: {query}")
+                if params:
+                    print(f"Parameters: {params}")
+                return pd.DataFrame()
+                
+            finally:
+                conn.close()
+                gc.collect()  # Force garbage collection after query
+                
+        except Exception as e:
+            print(f"Database error: {str(e)}")
+            print(f"Using database path: {db_path}")
+            return pd.DataFrame()
 
 # Updated database path configuration
 if os.environ.get('RENDER'):
