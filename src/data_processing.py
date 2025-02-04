@@ -112,62 +112,35 @@ class SaberProProcessor:
         db_path = self.create_database()
         conn = sqlite3.connect(db_path)
         
+        # Calculate total chunks for progress bar
         total_rows = sum(1 for _ in open(self.file_path)) - 1
         total_chunks = (total_rows // chunk_size) + 1
         
-        print(f"Starting data processing: {total_rows:,} total rows")
+        self.logger.info(f"Starting data processing: {total_rows:,} total rows")
         
         chunks = pd.read_csv(self.file_path, chunksize=chunk_size)
         for i, chunk in enumerate(tqdm(chunks, total=total_chunks, desc="Processing chunks")):
             try:
+                # Convert column names to lowercase
                 chunk.columns = chunk.columns.str.lower()
+                
+                # Write to SQLite
                 chunk.to_sql('saber_pro', conn, if_exists='append', index=False)
+                
+                # Commit every chunk
                 conn.commit()
+                
             except Exception as e:
-                print(f"Error processing chunk {i}: {str(e)}")
+                self.logger.error(f"Error processing chunk {i}: {str(e)}")
                 conn.rollback()
                 raise
         
-        print("\nCreating indexes for better query performance...")
-        
-        # Core indexes for frequently queried columns
+        # Create indexes for better query performance
+        print("\nCreating indexes...")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_periodo ON saber_pro(periodo)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_genero ON saber_pro(estu_genero)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_estrato ON saber_pro(fami_estratovivienda)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_caracter ON saber_pro(inst_caracter_academico)")
-        
-        # Additional indexes for performance optimization
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_origen ON saber_pro(inst_origen)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_nombre ON saber_pro(inst_nombre_institucion)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_depto ON saber_pro(estu_inst_departamento)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_valor_matricula ON saber_pro(estu_valormatriculauniversidad)")
-        
-        # Composite indexes for common query patterns
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_scores ON saber_pro(
-                mod_razona_cuantitat_punt,
-                mod_lectura_critica_punt,
-                mod_ingles_punt,
-                mod_competen_ciudada_punt
-            )
-        """)
-        
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_estrato_genero ON saber_pro(
-                fami_estratovivienda,
-                estu_genero
-            )
-        """)
-        
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_inst_matricula ON saber_pro(
-                inst_origen,
-                estu_valormatriculauniversidad
-            )
-        """)
-        
-        # Analyze the database for query optimization
-        conn.execute("ANALYZE")
         
         # Verify data loading
         cursor = conn.cursor()
