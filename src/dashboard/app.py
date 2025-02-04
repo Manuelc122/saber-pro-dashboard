@@ -2088,6 +2088,7 @@ def update_strata_performance_graph(metric):
             borderwidth=1
         ),
         margin=dict(l=60, r=60, t=100, b=60),
+        height=700,  # Increased height from default (450) to 700
         annotations=[
             dict(
                 text='Fuente: Base de Datos Saber Pro',
