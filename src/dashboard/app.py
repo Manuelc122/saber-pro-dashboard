@@ -5,8 +5,66 @@ import pandas as pd
 import sys
 import os
 import sqlite3
+from functools import lru_cache
+import gc
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from pathlib import Path
+
+# Initialize connection pool
+def create_connection():
+    if os.environ.get('RENDER'):
+        db_path = Path('/opt/render/project/src/data/processed/saber_pro.db')
+    else:
+        db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
+    
+    conn = sqlite3.connect(db_path)
+    conn.execute('PRAGMA cache_size = -2000')  # 2MB cache
+    conn.execute('PRAGMA temp_store = MEMORY')
+    conn.execute('PRAGMA journal_mode = WAL')
+    conn.execute('PRAGMA synchronous = NORMAL')
+    conn.execute('PRAGMA mmap_size = 30000000000')  # 30GB memory map
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# Implement chunked reading for large queries
+def read_query_in_chunks(query, conn, chunksize=10000):
+    for chunk in pd.read_sql_query(query, conn, chunksize=chunksize):
+        yield chunk
+
+# Cache query results
+@lru_cache(maxsize=32)
+def cached_query(query_str, params_str=None):
+    try:
+        conn = create_connection()
+        try:
+            chunks = []
+            for chunk in read_query_in_chunks(query_str, conn):
+                chunks.append(chunk)
+                # Force garbage collection after each chunk
+                gc.collect()
+            
+            result = pd.concat(chunks) if chunks else pd.DataFrame()
+            print(f"Query successful. Returned {len(result)} rows")
+            return result
+            
+        except sqlite3.Error as e:
+            print(f"SQLite error: {str(e)}")
+            print(f"Query: {query_str}")
+            return pd.DataFrame()
+            
+        finally:
+            conn.close()
+            gc.collect()
+            
+    except Exception as e:
+        print(f"Database error: {str(e)}")
+        return pd.DataFrame()
+
+# Replace query_db with optimized version
+def query_db(query, params=None):
+    # Convert params to string for caching
+    params_str = str(params) if params else None
+    return cached_query(query, params_str)
 
 # Initialize the Dash app
 app = Dash(__name__, 
@@ -27,7 +85,6 @@ host = '0.0.0.0'
 # Add memory configuration for production
 if os.environ.get('RENDER'):
     # Reduce memory usage in production
-    import gc
     gc.collect()  # Force garbage collection
     
     # Configure SQLite to use less memory
