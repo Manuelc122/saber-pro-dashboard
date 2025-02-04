@@ -1,8 +1,10 @@
 # Data files
 data/raw/*
 data/processed/*
+!data/processed/saber_pro.db
 *.csv
 *.db
+!data/processed/saber_pro.db
 
 # Python
 __pycache__/

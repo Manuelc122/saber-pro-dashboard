@@ -118,6 +118,80 @@ def query_db(query, params=None):
             print(f"Parameters: {params}")
         return pd.DataFrame()
 
+# Add after imports, before app initialization
+# Style Constants
+COLORS = {
+    'primary': '#1976D2',      # Updated to match the brighter blue
+    'secondary': '#34495e',    # Lighter blue for subtitles
+    'accent1': '#2E86C1',      # Blue for primary data series
+    'accent2': '#E91E63',      # Pink for secondary data series
+    'accent3': '#4CAF50',      # Green for tertiary data series
+    'background': '#f8f9fa',   # Light gray for backgrounds
+    'grid': 'rgba(189, 195, 199, 0.2)',  # Light gray for grids
+    'text': '#2c3e50',         # Dark blue for text
+    'white': '#ffffff'         # White
+}
+
+INSTITUTION_COLORS = {
+    'OFICIAL': COLORS['accent1'],
+    'NO OFICIAL': COLORS['accent2'],
+    'REGIMEN ESPECIAL': COLORS['accent3']
+}
+
+GENDER_COLORS = {
+    'M': COLORS['accent1'],
+    'F': COLORS['accent2']
+}
+
+FONTS = {
+    'primary': 'Roboto, sans-serif'
+}
+
+STYLES = {
+    'title': {
+        'textAlign': 'center',
+        'color': COLORS['primary'],
+        'marginBottom': '20px',
+        'fontSize': '22px',
+        'fontFamily': FONTS['primary'],
+        'fontWeight': 'bold'
+    },
+    'subtitle': {
+        'textAlign': 'center',
+        'color': COLORS['secondary'],
+        'marginBottom': '15px',
+        'fontSize': '18px',
+        'fontFamily': FONTS['primary']
+    },
+    'card': {
+        'backgroundColor': COLORS['white'],
+        'borderRadius': '8px',
+        'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
+        'padding': '20px',
+        'marginBottom': '20px'
+    },
+    'table_header': {
+        'backgroundColor': COLORS['primary'],
+        'color': COLORS['white'],
+        'padding': '12px',
+        'fontFamily': FONTS['primary'],
+        'fontWeight': 'bold'
+    },
+    'table_cell': {
+        'padding': '10px',
+        'backgroundColor': COLORS['white'],
+        'borderBottom': '1px solid #e0e0e0',
+        'fontFamily': FONTS['primary']
+    },
+    'graph': {
+        'height': 700,
+        'font_family': FONTS['primary'],
+        'title_size': 22,
+        'axis_title_size': 14,
+        'margin': dict(l=60, r=60, t=100, b=150)
+    }
+}
+
 # Initialize the Dash app
 app = Dash(__name__, 
     external_stylesheets=[
@@ -330,8 +404,88 @@ GRAPH_TITLE_STYLE = {
     }
 }
 
+# Add after style definitions and before callbacks
+def create_base_graph_layout(title, xaxis_title, yaxis_title, df, show_legend=False):
+    """Create a base layout for graphs with consistent styling"""
+    return dict(
+        title=dict(
+            text=title,
+            font=dict(
+                size=STYLES['graph']['title_size'],
+                color=COLORS['primary'],
+                family=STYLES['graph']['font_family']
+            ),
+            x=0.5,
+            y=0.95
+        ),
+        xaxis=dict(
+            title=dict(
+                text=xaxis_title,
+                font=dict(
+                    size=STYLES['graph']['axis_title_size'],
+                    color=COLORS['primary'],
+                    family=STYLES['graph']['font_family']
+                )
+            ),
+            showgrid=True,
+            gridcolor=COLORS['grid'],
+            showline=True,
+            linewidth=2,
+            linecolor=COLORS['primary'],
+            tickangle=45
+        ),
+        yaxis=dict(
+            title=dict(
+                text=yaxis_title,
+                font=dict(
+                    size=STYLES['graph']['axis_title_size'],
+                    color=COLORS['primary'],
+                    family=STYLES['graph']['font_family']
+                )
+            ),
+            showgrid=True,
+            gridcolor=COLORS['grid'],
+            showline=True,
+            linewidth=2,
+            linecolor=COLORS['primary'],
+            range=[min(df['score']) - 2, max(df['score']) + 2] if 'score' in df.columns else None
+        ),
+        plot_bgcolor=COLORS['white'],
+        paper_bgcolor=COLORS['white'],
+        showlegend=show_legend,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="right",
+            x=0.99,
+            bgcolor='rgba(255, 255, 255, 0.8)',
+            bordercolor=COLORS['primary'],
+            borderwidth=1
+        ),
+        margin=dict(l=60, r=60, t=100, b=150),  # Increased bottom margin for source annotation
+        height=STYLES['graph']['height'],
+        annotations=[
+            dict(
+                text='Fuente: Base de Datos Saber Pro',
+                xref='paper',
+                yref='paper',
+                x=1,
+                y=-0.4,
+                showarrow=False,
+                font=dict(
+                    size=12,
+                    color=COLORS['secondary'],
+                    family=STYLES['graph']['font_family']
+                ),
+                align='right'
+            )
+        ],
+        hovermode='x unified'
+    )
+
 # Updated dashboard layout with dataset overview tab
 app.layout = html.Div([
+    html.H1("Análisis Saber Pro", style=STYLES['title']),
     _db_warning,
     dcc.Tabs([
         dcc.Tab(label="Análisis Descriptivo", children=[
@@ -569,6 +723,41 @@ app.layout = html.Div([
                     ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
                     dcc.Graph(id='mother-education-graph', style={'marginBottom': '20px'}),
                     dcc.Graph(id='father-education-graph'),
+                ], className='card'),
+
+                # Tuition Costs Analysis Section
+                html.Div([
+                    html.H4("Relación entre Costos de Matrícula y Desempeño", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
+                    html.Div([
+                        html.Label("Seleccionar Módulo:", style={'marginRight': '10px', 'color': '#2c3e50'}),
+                        dcc.Dropdown(
+                            id='tuition-performance-metric',
+                            options=[
+                                {'label': 'Promedio General', 'value': 'avg_score'},
+                                {'label': 'Razonamiento Cuantitativo', 'value': 'math_score'},
+                                {'label': 'Lectura Crítica', 'value': 'reading_score'},
+                                {'label': 'Inglés', 'value': 'english_score'},
+                                {'label': 'Competencias Ciudadanas', 'value': 'citizenship_score'}
+                            ],
+                            value='avg_score',
+                            style={'width': '300px'},
+                            clearable=False
+                        ),
+                        html.Label("Tipo de Institución:", style={'marginLeft': '20px', 'marginRight': '10px', 'color': '#2c3e50'}),
+                        dcc.Dropdown(
+                            id='institution-type',
+                            options=[
+                                {'label': 'Todas', 'value': 'all'},
+                                {'label': 'Oficial', 'value': 'OFICIAL'},
+                                {'label': 'No Oficial', 'value': 'NO OFICIAL'},
+                                {'label': 'Régimen Especial', 'value': 'REGIMEN ESPECIAL'}
+                            ],
+                            value='all',
+                            style={'width': '200px'},
+                            clearable=False
+                        )
+                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'marginBottom': '20px'}),
+                    dcc.Graph(id='tuition-performance-graph'),
                 ], className='card')
             ])
         ])
@@ -1285,229 +1474,169 @@ def update_parents_education_summary(_):
     Input('education-costs-summary', 'id')
 )
 def update_education_costs_summary(_):
-    # Query for education costs
+    # Query for education costs distribution
     query = """
     SELECT 
-        ESTU_VALORMATRICULAUNIVERSIDAD as cost_range,
+        estu_valormatriculauniversidad as tuition_range,
         COUNT(*) as count,
-        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as percentage
+        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as percentage,
+        ROUND(AVG((mod_razona_cuantitat_punt + mod_lectura_critica_punt + mod_ingles_punt + mod_competen_ciudada_punt)/4.0), 1) as avg_score,
+        CASE estu_valormatriculauniversidad
+            WHEN 'Menos de 500 mil' THEN 1
+            WHEN 'Entre 500 mil y menos de 1 millón' THEN 2
+            WHEN 'Entre 1 millón y menos de 2.5 millones' THEN 3
+            WHEN 'Entre 2.5 millones y menos de 4 millones' THEN 4
+            WHEN 'Entre 4 millones y menos de 5.5 millones' THEN 5
+            WHEN 'Entre 5.5 millones y menos de 7 millones' THEN 6
+            WHEN 'Más de 7 millones' THEN 7
+            ELSE 8
+        END as order_num
     FROM saber_pro
-    WHERE ESTU_VALORMATRICULAUNIVERSIDAD IS NOT NULL
-    GROUP BY ESTU_VALORMATRICULAUNIVERSIDAD
-    ORDER BY 
-        CASE ESTU_VALORMATRICULAUNIVERSIDAD
-            WHEN 'No pagó matrícula' THEN 1
-            WHEN 'Menos de 500 mil' THEN 2
-            WHEN 'Entre 500 mil y menos de 1 millón' THEN 3
-            WHEN 'Entre 1 millón y menos de 2.5 millones' THEN 4
-            WHEN 'Entre 2.5 millones y menos de 4 millones' THEN 5
-            WHEN 'Entre 4 millones y menos de 5.5 millones' THEN 6
-            WHEN 'Entre 5.5 millones y menos de 7 millones' THEN 7
-            WHEN 'Más de 7 millones' THEN 8
-            ELSE 9
-        END
+    WHERE estu_valormatriculauniversidad IS NOT NULL
+    GROUP BY estu_valormatriculauniversidad
+    ORDER BY order_num
     """
-    costs_df = query_db(query)
-
-    # Query for payment methods
-    payment_query = """
-    WITH payment_methods AS (
-        SELECT 
-            'Beca' as method,
-            COUNT(CASE WHEN ESTU_PAGOMATRICULABECA = 'Si' THEN 1 END) as count,
-            ROUND(AVG(CASE WHEN ESTU_PAGOMATRICULABECA = 'Si' THEN 
-                (mod_razona_cuantitat_punt + mod_lectura_critica_punt + mod_ingles_punt + mod_competen_ciudada_punt)/4.0 
-            END), 1) as avg_score
-        FROM saber_pro
-        WHERE ESTU_PAGOMATRICULABECA IS NOT NULL
-        
-        UNION ALL
-        
-        SELECT 
-            'Crédito' as method,
-            COUNT(CASE WHEN ESTU_PAGOMATRICULACREDITO = 'Si' THEN 1 END) as count,
-            ROUND(AVG(CASE WHEN ESTU_PAGOMATRICULACREDITO = 'Si' THEN 
-                (mod_razona_cuantitat_punt + mod_lectura_critica_punt + mod_ingles_punt + mod_competen_ciudada_punt)/4.0 
-            END), 1) as avg_score
-        FROM saber_pro
-        WHERE ESTU_PAGOMATRICULACREDITO IS NOT NULL
-        
-        UNION ALL
-        
-        SELECT 
-            'Padres' as method,
-            COUNT(CASE WHEN ESTU_PAGOMATRICULAPADRES = 'Si' THEN 1 END) as count,
-            ROUND(AVG(CASE WHEN ESTU_PAGOMATRICULAPADRES = 'Si' THEN 
-                (mod_razona_cuantitat_punt + mod_lectura_critica_punt + mod_ingles_punt + mod_competen_ciudada_punt)/4.0 
-            END), 1) as avg_score
-        FROM saber_pro
-        WHERE ESTU_PAGOMATRICULAPADRES IS NOT NULL
-        
-        UNION ALL
-        
-        SELECT 
-            'Recursos Propios' as method,
-            COUNT(CASE WHEN ESTU_PAGOMATRICULAPROPIO = 'Si' THEN 1 END) as count,
-            ROUND(AVG(CASE WHEN ESTU_PAGOMATRICULAPROPIO = 'Si' THEN 
-                (mod_razona_cuantitat_punt + mod_lectura_critica_punt + mod_ingles_punt + mod_competen_ciudada_punt)/4.0 
-            END), 1) as avg_score
-        FROM saber_pro
-        WHERE ESTU_PAGOMATRICULAPROPIO IS NOT NULL
-    )
-    SELECT * FROM payment_methods
-    ORDER BY count DESC
-    """
-    payment_df = query_db(payment_query)
     
-    # Create the costs distribution graph
+    costs_df = query_db(query)
+    
+    if costs_df.empty:
+        return html.Div("No hay datos disponibles para el análisis de costos de matrícula")
+    
+    # Create bar chart
     costs_fig = go.Figure()
     
-    # Add bars for student counts
     costs_fig.add_trace(go.Bar(
-        x=costs_df['cost_range'],
-        y=costs_df['count'],
-        name='Cantidad de Estudiantes',
-        marker_color='#1976D2'
+        x=costs_df['tuition_range'],
+        y=costs_df['percentage'],
+        text=[f"{p}%" for p in costs_df['percentage']],
+        textposition='auto',
+        marker_color=COLORS['primary'],  # Updated to use primary color
+        hovertemplate="<b>%{x}</b><br>" +
+                     "Porcentaje: %{text}<br>" +
+                     "Estudiantes: %{customdata:,.0f}<br>" +
+                     "Puntaje promedio: %{customdata2:.1f}<br>" +
+                     "<extra></extra>",
+        customdata=costs_df[['count', 'avg_score']].values
     ))
-
-    # Update layout
+    
+    # Update layout using the standardized styles
     costs_fig.update_layout(
-        title={
-            'text': 'Distribución de Costos de Matrícula',
-            'y': 0.95,
-            'x': 0.5,
-            'xanchor': 'center',
-            'yanchor': 'top',
-            'font': {
-                'family': 'Roboto, sans-serif',
-                'size': 22,
-                'color': '#2c3e50'
-            }
-        },
-        xaxis_title='Rango de Costos',
-        yaxis_title='Cantidad de Estudiantes',
-        template='plotly_white',
+        title=dict(
+            text='Distribución de Costos de Matrícula',
+            font=dict(
+                size=STYLES['graph']['title_size'],
+                color='#2c3e50',  # Updated to match other titles
+                family=FONTS['primary']
+            ),
+            x=0.5,
+            y=0.95
+        ),
+        xaxis=dict(
+            title=dict(
+                text='Rango de Costos',
+                font=dict(
+                    size=STYLES['graph']['axis_title_size'],
+                    color='#2c3e50',  # Updated to match other axis titles
+                    family=FONTS['primary']
+                )
+            ),
+            tickangle=45,
+            showgrid=True,
+            gridcolor=COLORS['grid'],
+            showline=True,
+            linewidth=2,
+            linecolor=COLORS['primary']
+        ),
+        yaxis=dict(
+            title=dict(
+                text='Porcentaje de Estudiantes',
+                font=dict(
+                    size=STYLES['graph']['axis_title_size'],
+                    color='#2c3e50',  # Updated to match other axis titles
+                    family=FONTS['primary']
+                )
+            ),
+            ticksuffix='%',
+            showgrid=True,
+            gridcolor=COLORS['grid'],
+            showline=True,
+            linewidth=2,
+            linecolor=COLORS['primary']
+        ),
+        plot_bgcolor=COLORS['white'],
+        paper_bgcolor=COLORS['white'],
         showlegend=False,
-        xaxis={'categoryorder': 'array', 'categoryarray': costs_df['cost_range'].tolist()},
-        hoverlabel={'bgcolor': 'white'},
+        margin=STYLES['graph']['margin'],
+        height=STYLES['graph']['height'],
+        annotations=[
+            dict(
+                text='Fuente: Base de Datos Saber Pro',
+                xref='paper',
+                yref='paper',
+                x=1,
+                y=-0.4,
+                showarrow=False,
+                font=dict(
+                    size=12,
+                    color=COLORS['secondary'],
+                    family=FONTS['primary']
+                ),
+                align='right'
+            )
+        ],
         hovermode='x unified'
     )
-
-    # Add percentage labels on top of bars
-    costs_fig.update_traces(
-        text=[f"{p:.1f}%" for p in costs_df['percentage']],
-        textposition='outside',
-        hovertemplate="<br>".join([
-            "<b>%{x}</b>",
-            "Cantidad: %{y:,.0f}",
-            "Porcentaje: %{text}"
-        ])
-    )
-
-    # Create payment methods graph
-    payment_fig = go.Figure()
     
-    # Add bars for payment methods
-    payment_fig.add_trace(go.Bar(
-        x=payment_df['method'],
-        y=payment_df['count'],
-        text=[f"{count:,.0f}<br>({score:.1f})" for count, score in zip(payment_df['count'], payment_df['avg_score'])],
-        textposition='auto',
-        marker_color='#1976D2',
-        hovertemplate="<b>%{x}</b><br>" +
-                     "Cantidad: %{y:,.0f}<br>" +
-                     "Puntaje: %{customdata:.1f}<br>" +
-                     "<extra></extra>",
-        customdata=payment_df['avg_score']
-    ))
-
-    # Update layout for payment methods graph
-    payment_fig.update_layout(
-        title={
-            'text': 'Distribución de Métodos de Pago',
-            'y': 0.95,
-            'x': 0.5,
-            'xanchor': 'center',
-            'yanchor': 'top',
-            'font': {
-                'family': 'Roboto, sans-serif',
-                'size': 22,
-                'color': '#2c3e50'
-            }
-        },
-        xaxis_title='Método de Pago',
-        yaxis_title='Cantidad de Estudiantes',
-        template='plotly_white',
-        showlegend=False,
-        hoverlabel={'bgcolor': 'white'},
-        hovermode='x unified',
-        margin=dict(t=80, r=20, l=20, b=20),
-        height=500
-    )
-
+    # Create summary table with standardized styles
     return html.Div([
-        # Costs Distribution Table
+        # Table Section
         html.Div([
-            html.H5("Distribución de Costos", style=TABLE_TITLE_STYLE),
             html.Table([
-                html.Thead(
+                # Header
+                html.Thead([
                     html.Tr([
-                        html.Th("Rango de Costos", style={
-                            'padding': '12px',
-                            'backgroundColor': '#1976D2',
-                            'color': 'white',
-                            'textAlign': 'left',
-                            'fontWeight': 'bold'
+                        html.Th('Rango de Costos', style={
+                            **STYLES['table_header'],
+                            'backgroundColor': COLORS['primary']  # Updated to use primary color
                         }),
-                        html.Th("Cantidad", style={
-                            'padding': '12px',
-                            'backgroundColor': '#1976D2',
-                            'color': 'white',
-                            'textAlign': 'right',
-                            'fontWeight': 'bold'
+                        html.Th('Estudiantes', style={
+                            **STYLES['table_header'],
+                            'backgroundColor': COLORS['primary'],  # Updated to use primary color
+                            'textAlign': 'right'
                         }),
-                        html.Th("Porcentaje", style={
-                            'padding': '12px',
-                            'backgroundColor': '#1976D2',
-                            'color': 'white',
-                            'textAlign': 'right',
-                            'fontWeight': 'bold'
+                        html.Th('Porcentaje', style={
+                            **STYLES['table_header'],
+                            'backgroundColor': COLORS['primary'],  # Updated to use primary color
+                            'textAlign': 'right'
+                        }),
+                        html.Th('Puntaje Promedio', style={
+                            **STYLES['table_header'],
+                            'backgroundColor': COLORS['primary'],  # Updated to use primary color
+                            'textAlign': 'right'
                         })
                     ])
-                ),
+                ]),
+                # Body
                 html.Tbody([
                     html.Tr([
-                        html.Td(row['cost_range'], style={
-                            'padding': '10px',
-                            'backgroundColor': 'white',
-                            'borderBottom': '1px solid #e0e0e0'
-                        }),
-                        html.Td(f"{int(row['count']):,}", style={
-                            'padding': '10px',
-                            'backgroundColor': 'white',
-                            'textAlign': 'right',
-                            'borderBottom': '1px solid #e0e0e0'
-                        }),
-                        html.Td(f"{row['percentage']:.1f}%", style={
-                            'padding': '10px',
-                            'backgroundColor': 'white',
-                            'textAlign': 'right',
-                            'borderBottom': '1px solid #e0e0e0'
-                        })
+                        html.Td(row['tuition_range'], style=STYLES['table_cell']),
+                        html.Td(f"{int(row['count']):,}", style={**STYLES['table_cell'], 'textAlign': 'right'}),
+                        html.Td(f"{row['percentage']:.1f}%", style={**STYLES['table_cell'], 'textAlign': 'right'}),
+                        html.Td(f"{row['avg_score']:.1f}", style={**STYLES['table_cell'], 'textAlign': 'right'})
                     ]) for _, row in costs_df.iterrows()
                 ])
             ], style={
                 'width': '100%',
                 'borderCollapse': 'collapse',
                 'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
-                'backgroundColor': 'white',
+                'backgroundColor': COLORS['white'],
                 'borderRadius': '8px',
                 'overflow': 'hidden',
                 'marginBottom': '20px'
-            }),
+            })
         ]),
         
-        # Costs Distribution Graph
+        # Graph Section
         dcc.Graph(
             figure=costs_fig,
             config={
@@ -1515,94 +1644,10 @@ def update_education_costs_summary(_):
                 'displaylogo': False,
                 'modeBarButtonsToRemove': ['lasso2d', 'select2d']
             },
-            style={
-                'backgroundColor': 'white',
-                'borderRadius': '8px',
-                'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
-                'padding': '15px',
-                'marginBottom': '20px'
-            }
-        ),
-        
-        # Payment Methods Table
-        html.Div([
-            html.H5("Métodos de Pago", style=TABLE_TITLE_STYLE),
-            html.Table([
-                html.Thead(
-                    html.Tr([
-                        html.Th("Método", style={
-                            'padding': '12px',
-                            'backgroundColor': '#1976D2',
-                            'color': 'white',
-                            'textAlign': 'left',
-                            'fontWeight': 'bold'
-                        }),
-                        html.Th("Cantidad", style={
-                            'padding': '12px',
-                            'backgroundColor': '#1976D2',
-                            'color': 'white',
-                            'textAlign': 'right',
-                            'fontWeight': 'bold'
-                        }),
-                        html.Th("Puntaje Promedio", style={
-                            'padding': '12px',
-                            'backgroundColor': '#1976D2',
-                            'color': 'white',
-                            'textAlign': 'right',
-                            'fontWeight': 'bold'
-                        })
-                    ])
-                ),
-                html.Tbody([
-                    html.Tr([
-                        html.Td(row['method'], style={
-                            'padding': '10px',
-                            'backgroundColor': 'white',
-                            'borderBottom': '1px solid #e0e0e0'
-                        }),
-                        html.Td(f"{int(row['count']):,}", style={
-                            'padding': '10px',
-                            'backgroundColor': 'white',
-                            'textAlign': 'right',
-                            'borderBottom': '1px solid #e0e0e0'
-                        }),
-                        html.Td(f"{row['avg_score']:.1f}", style={
-                            'padding': '10px',
-                            'backgroundColor': 'white',
-                            'textAlign': 'right',
-                            'borderBottom': '1px solid #e0e0e0'
-                        })
-                    ]) for _, row in payment_df.iterrows()
-                ])
-            ], style={
-                'width': '100%',
-                'borderCollapse': 'collapse',
-                'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
-                'backgroundColor': 'white',
-                'borderRadius': '8px',
-                'overflow': 'hidden',
-                'marginBottom': '20px'
-            })
-        ]),
-        
-        # Payment Methods Graph
-        dcc.Graph(
-            figure=payment_fig,
-            config={
-                'displayModeBar': True,
-                'displaylogo': False,
-                'modeBarButtonsToRemove': ['lasso2d', 'select2d']
-            },
-            style={
-                'backgroundColor': 'white',
-                'borderRadius': '8px',
-                'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
-                'padding': '15px',
-                'marginBottom': '20px'
-            }
+            style=STYLES['card']
         )
     ], style={
-        'backgroundColor': '#f8f9fa',
+        'backgroundColor': COLORS['background'],
         'padding': '20px',
         'borderRadius': '10px',
         'marginBottom': '20px'
@@ -2103,9 +2148,10 @@ def update_strata_performance_graph(metric):
         showlegend=True,
         legend=dict(
             yanchor="top",
-            y=0.99,
-            xanchor="right",
-            x=0.99,
+            y=0.99,  # At the top
+            xanchor="center",
+            x=0.5,  # Centered horizontally
+            orientation="h",  # Horizontal layout
             bgcolor='rgba(255, 255, 255, 0.8)',
             bordercolor='#2c3e50',
             borderwidth=1
@@ -2313,6 +2359,246 @@ def update_parents_education_graphs(metric):
         return fig
     
     return create_education_figure(mother_df, "mother"), create_education_figure(father_df, "father")
+
+# Add new callback for tuition costs vs performance graph
+@app.callback(
+    Output('tuition-performance-graph', 'figure'),
+    [Input('tuition-performance-metric', 'value'),
+     Input('institution-type', 'value')]
+)
+def update_tuition_performance_graph(metric, institution_type):
+    # Define the metric mapping
+    metric_mapping = {
+        'avg_score': '(mod_razona_cuantitat_punt + mod_lectura_critica_punt + mod_ingles_punt + mod_competen_ciudada_punt)/4.0',
+        'math_score': 'mod_razona_cuantitat_punt',
+        'reading_score': 'mod_lectura_critica_punt',
+        'english_score': 'mod_ingles_punt',
+        'citizenship_score': 'mod_competen_ciudada_punt'
+    }
+    
+    # Spanish translations for metric names
+    metric_translations = {
+        'math_score': 'Razonamiento Cuantitativo',
+        'reading_score': 'Lectura Crítica',
+        'english_score': 'Inglés',
+        'citizenship_score': 'Competencias Ciudadanas',
+        'avg_score': 'Promedio General'
+    }
+    
+    # Query to get average scores by tuition cost ranges
+    query = f"""
+    WITH standardized_data AS (
+        SELECT 
+            estu_valormatriculauniversidad,
+            CASE 
+                WHEN inst_origen IN ('OFICIAL DEPARTAMENTAL', 'OFICIAL NACIONAL', 'OFICIAL MUNICIPAL') THEN 'OFICIAL'
+                WHEN inst_origen IN ('NO OFICIAL - CORPORACIÓN', 'NO OFICIAL - FUNDACIÓN') THEN 'NO OFICIAL'
+                WHEN inst_origen = 'REGIMEN ESPECIAL' THEN 'REGIMEN ESPECIAL'
+                ELSE inst_origen
+            END as inst_origen_std,
+            {metric_mapping[metric]} as score
+        FROM saber_pro
+        WHERE estu_valormatriculauniversidad IS NOT NULL 
+        AND estu_valormatriculauniversidad != 'No pagó matrícula'
+        {" AND (inst_origen IN ('OFICIAL DEPARTAMENTAL', 'OFICIAL NACIONAL', 'OFICIAL MUNICIPAL')" + 
+          " OR inst_origen IN ('NO OFICIAL - CORPORACIÓN', 'NO OFICIAL - FUNDACIÓN')" +
+          " OR inst_origen = 'REGIMEN ESPECIAL')" if institution_type == 'all' else
+          " AND (CASE " +
+          "WHEN '" + institution_type + "' = 'OFICIAL' THEN inst_origen IN ('OFICIAL DEPARTAMENTAL', 'OFICIAL NACIONAL', 'OFICIAL MUNICIPAL') " +
+          "WHEN '" + institution_type + "' = 'NO OFICIAL' THEN inst_origen IN ('NO OFICIAL - CORPORACIÓN', 'NO OFICIAL - FUNDACIÓN') " +
+          "ELSE inst_origen = '" + institution_type + "' END)"}
+    )
+    SELECT 
+        estu_valormatriculauniversidad as tuition_range,
+        inst_origen_std as institution_type,
+        ROUND(AVG(score), 2) as score,
+        COUNT(*) as count,
+        CASE estu_valormatriculauniversidad
+            WHEN 'Menos de 500 mil' THEN 1
+            WHEN 'Entre 500 mil y menos de 1 millón' THEN 2
+            WHEN 'Entre 1 millón y menos de 2.5 millones' THEN 3
+            WHEN 'Entre 2.5 millones y menos de 4 millones' THEN 4
+            WHEN 'Entre 4 millones y menos de 5.5 millones' THEN 5
+            WHEN 'Entre 5.5 millones y menos de 7 millones' THEN 6
+            WHEN 'Más de 7 millones' THEN 7
+            ELSE 8
+        END as order_num
+    FROM standardized_data
+    GROUP BY tuition_range, inst_origen_std, order_num
+    ORDER BY order_num
+    """
+    
+    df = query_db(query)
+    
+    if df.empty:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No hay datos disponibles para el análisis de costos de matrícula",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color=COLORS['primary'])
+        )
+        return fig
+
+    # Create figure
+    fig = go.Figure()
+    
+    # Names mapping for institution types
+    names = {
+        'OFICIAL': 'Oficial',
+        'NO OFICIAL': 'No Oficial',
+        'REGIMEN ESPECIAL': 'Régimen Especial'
+    }
+    
+    if institution_type == 'all':
+        # Add a line for each institution type
+        for inst_type in INSTITUTION_COLORS.keys():
+            inst_data = df[df['institution_type'] == inst_type]
+            if not inst_data.empty:
+                fig.add_trace(go.Scatter(
+                    x=inst_data['tuition_range'],
+                    y=inst_data['score'],
+                    name=names[inst_type],
+                    mode='lines+markers+text',
+                    text=[f'{score:.1f}' for score in inst_data['score']],
+                    textposition='top center',
+                    textfont=dict(
+                        size=12,
+                        color=INSTITUTION_COLORS[inst_type],
+                        family=FONTS['primary']
+                    ),
+                    line=dict(
+                        color=INSTITUTION_COLORS[inst_type],
+                        width=3
+                    ),
+                    marker=dict(
+                        size=8,
+                        color=INSTITUTION_COLORS[inst_type],
+                        line=dict(color=COLORS['white'], width=2)
+                    ),
+                    hovertemplate="<b>%{x}</b><br>" +
+                                 f"{names[inst_type]}<br>" +
+                                 "Puntaje: %{y:.1f}<br>" +
+                                 "Estudiantes: %{customdata:,.0f}<br>" +
+                                 "<extra></extra>",
+                    customdata=inst_data['count']
+                ))
+    else:
+        # Add single line for selected institution type
+        fig.add_trace(go.Scatter(
+            x=df['tuition_range'],
+            y=df['score'],
+            name=names.get(institution_type, institution_type),
+            mode='lines+markers+text',
+            text=[f'{score:.1f}' for score in df['score']],
+            textposition='top center',
+            textfont=dict(
+                size=12,
+                color=INSTITUTION_COLORS.get(institution_type, COLORS['accent1']),
+                family=FONTS['primary']
+            ),
+            line=dict(
+                color=INSTITUTION_COLORS.get(institution_type, COLORS['accent1']),
+                width=3
+            ),
+            marker=dict(
+                size=8,
+                color=INSTITUTION_COLORS.get(institution_type, COLORS['accent1']),
+                line=dict(color=COLORS['white'], width=2)
+            ),
+            hovertemplate="<b>%{x}</b><br>" +
+                         "Puntaje: %{y:.1f}<br>" +
+                         "Estudiantes: %{customdata:,.0f}<br>" +
+                         "<extra></extra>",
+            customdata=df['count']
+        ))
+    
+    # Update layout using the base layout function
+    fig.update_layout(
+        title=dict(
+            text=f'Relación entre Costos de Matrícula y {metric_translations[metric]}',
+            font=dict(
+                size=22,
+                color='#2c3e50',
+                family=FONTS['primary']
+            ),
+            x=0.5,
+            y=0.95
+        ),
+        xaxis=dict(
+            title=dict(
+                text='Rango de Costos de Matrícula',
+                font=dict(
+                    size=14,
+                    color='#2c3e50',
+                    family=FONTS['primary']
+                )
+            ),
+            tickangle=45,
+            showgrid=True,
+            gridcolor=COLORS['grid'],
+            showline=True,
+            linewidth=2,
+            linecolor='#2c3e50'
+        ),
+        yaxis=dict(
+            title=dict(
+                text='Puntaje Promedio',
+                font=dict(
+                    size=14,
+                    color='#2c3e50',
+                    family=FONTS['primary']
+                )
+            ),
+            showgrid=True,
+            gridcolor=COLORS['grid'],
+            showline=True,
+            linewidth=2,
+            linecolor='#2c3e50',
+            range=[min(df['score']) - 2, max(df['score']) + 2]
+        ),
+        plot_bgcolor=COLORS['white'],
+        paper_bgcolor=COLORS['white'],
+        showlegend=institution_type == 'all',
+        legend=dict(
+            yanchor="top",
+            y=0.99,  # At the top
+            xanchor="center",
+            x=0.5,  # Centered horizontally
+            orientation="h",  # Horizontal layout
+            bgcolor='rgba(255, 255, 255, 0.8)',
+            bordercolor='#2c3e50',
+            borderwidth=1
+        ),
+        margin=dict(l=60, r=60, t=100, b=60),  # Reduced bottom margin since legend is now at top
+        height=700,
+        annotations=[
+            dict(
+                text='Fuente: Base de Datos Saber Pro',
+                xref='paper',
+                yref='paper',
+                x=1,
+                y=-0.4,
+                showarrow=False,
+                font=dict(
+                    size=12,
+                    color=COLORS['secondary'],
+                    family=FONTS['primary']
+                ),
+                align='right'
+            )
+        ],
+        hovermode='x unified'
+    )
+    
+    # Add a subtle grid pattern
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(189, 195, 199, 0.2)')
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(189, 195, 199, 0.2)')
+    
+    return fig
 
 if __name__ == '__main__':
     app.run_server(debug=True, host=host, port=port) 
