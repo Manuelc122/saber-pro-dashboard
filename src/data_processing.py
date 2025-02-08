@@ -3,9 +3,15 @@ import numpy as np
 import sqlite3
 from pathlib import Path
 import logging
-from tqdm import tqdm
-from typing import Dict
 import os
+
+# Make tqdm optional
+try:
+    from tqdm import tqdm
+except ImportError:
+    # Create a simple replacement for tqdm if it's not available
+    def tqdm(iterable, *args, **kwargs):
+        return iterable
 
 class SaberProProcessor:
     def __init__(self, csv_path):

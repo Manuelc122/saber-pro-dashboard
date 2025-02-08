@@ -19,6 +19,9 @@ app = Dash(__name__,
     ]
 )
 
+# Add after app initialization, before the layout
+server = app.server  # Expose server variable for Gunicorn
+
 # Style constants
 COLORS = {
     # Primary Brand Colors
