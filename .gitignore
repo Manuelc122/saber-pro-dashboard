@@ -58,4 +58,4 @@ Thumbs.db
 *.log
 .coverage
 htmlcov/
-.pytest_cache/ 
+.pytest_cache/ data/processed/saber_pro.db
