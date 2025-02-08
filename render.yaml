@@ -1,0 +1,17 @@
+# Render configuration file
+services:
+  - type: web
+    name: saber-pro-dashboard
+    env: python
+    buildCommand: |
+      pip install -r requirements.txt
+      mkdir -p data/processed
+      cp data/processed/saber_pro.db data/processed/
+    startCommand: gunicorn --chdir src app:server
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: RENDER
+        value: true
+      - key: PYTHONPATH
+        value: /opt/render/project/src

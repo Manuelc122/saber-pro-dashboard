@@ -20,10 +20,12 @@ server = app.server
 # Determine the correct database path
 if os.environ.get('RENDER'):
     # Production path on Render
-    DB_PATH = Path('data/processed/saber_pro.db')
+    DB_PATH = Path('/opt/render/project/src/data/processed/saber_pro.db').resolve()
 else:
-    # Development path
-    DB_PATH = Path('data/processed/saber_pro.db')
+    # Development path - relative to this file
+    DB_PATH = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
+
+print(f"Using database path: {DB_PATH}")
 
 def query_db(query, params=None):
     """Execute a query and return results as a DataFrame."""
