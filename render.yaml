@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: saber-pro-dashboard
+    env: python
+    buildCommand: |
+      pip install -r requirements.txt
+      mkdir -p /opt/render/project/src/data/processed
+      python create_test_db.py
+    startCommand: gunicorn src.dashboard.app:server
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: RENDER
+        value: true
