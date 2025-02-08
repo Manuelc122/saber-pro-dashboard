@@ -1,66 +1,49 @@
 # Saber Pro Analysis Dashboard
 
-An interactive dashboard for analyzing Colombia's Saber Pro standardized test results from 2018-2021. The dashboard provides insights into student performance, socioeconomic factors, and educational trends.
+## Overview
+A comprehensive dashboard for analyzing Colombia's Saber Pro test results from 2018-2021. This dashboard provides insights into student performance patterns, socioeconomic impacts, and educational gaps across different demographics.
 
 ## Features
+- **Basic Analysis**: Performance trends, gender distribution, and socioeconomic factors
+- **Advanced Analysis**: Statistical analysis of score distributions and correlations
+- **Deep Insights**: Performance gaps and educational background impact analysis
 
-- **Basic Analysis**
-  - Yearly Performance Trends
-  - Gender Distribution Analysis
-  - Socioeconomic Impact Analysis
-  - Technology Access Impact
+## Technology Stack
+- Python 3.9.7
+- Dash 2.14.2
+- Plotly 5.18.0
+- SQLite3
+- Additional dependencies in requirements.txt
 
-- **Advanced Analysis**
-  - Score Distribution Analysis
-  - Multivariate Performance Analysis
-  - Performance Patterns
-
-- **Deep Insights**
-  - Performance Gap Analysis
-  - Educational Background Impact
-  - Temporal Performance Patterns
-
-## Installation
-
+## Local Development Setup
 1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/saber-pro-dashboard.git
-cd saber-pro-dashboard
-```
+   ```bash
+   git clone https://github.com/yourusername/saber-pro-dashboard.git
+   cd saber-pro-dashboard
+   ```
 
 2. Create and activate a virtual environment:
-```bash
-python -m venv .myenv
-source .myenv/bin/activate  # On Windows: .myenv\Scripts\activate
-```
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
 3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-4. Initialize the database:
-```bash
-python create_test_db.py
-```
+4. Initialize the test database:
+   ```bash
+   python create_test_db.py
+   ```
 
-5. Run the dashboard:
-```bash
-python src/dashboard/app.py
-```
-
-The dashboard will be available at `http://localhost:8051`
-
-## Data Description
-
-The dashboard uses a sample of 10,000 records from the Saber Pro test results (2018-2021), including:
-- Test scores in four components
-- Student demographics
-- Socioeconomic information
-- Technology access data
+5. Run the development server:
+   ```bash
+   python src/dashboard/app.py
+   ```
 
 ## Project Structure
-
 ```
 saber-pro-dashboard/
 ├── src/
@@ -69,28 +52,46 @@ saber-pro-dashboard/
 │   └── data_processing/
 │       └── __init__.py
 ├── data/
-│   └── saber_pro.db
+│   └── processed/
+│       └── saber_pro.db
+├── notebooks/
+├── sql/
 ├── requirements.txt
-├── create_test_db.py
-└── README.md
+├── render.yaml
+├── README.md
+└── .gitignore
 ```
 
-## Technologies Used
+## Deployment
+### Render Deployment
+1. Fork/Clone this repository
+2. Connect your GitHub repository to Render
+3. Create a new Web Service
+4. Use the following settings:
+   - Build Command: `pip install -r requirements.txt`
+   - Start Command: `gunicorn src.dashboard.app:server`
 
-- Python 3.8+
-- Dash
-- Plotly
-- Pandas
-- SQLite
+### Environment Variables
+Required environment variables in Render:
+- PYTHON_VERSION: 3.9.7
+- PYTHONPATH: .
+
+## Data Sources
+The dashboard uses a test database that simulates the Saber Pro test results with:
+- 2,000 records per socioeconomic stratum
+- Realistic correlations between variables
+- Data spanning from 2018 to 2021
+
+## Contributing
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
-
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Contributors
-
-- Your Name
-
-## Acknowledgments
-
-- Data provided by ICFES (Instituto Colombiano para la Evaluación de la Educación) 
+## Contact
+Your Name - your.email@example.com
+Project Link: https://github.com/yourusername/saber-pro-dashboard 

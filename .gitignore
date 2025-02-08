@@ -29,12 +29,10 @@ wheels/
 *.egg
 
 # Virtual Environment
-.env
-.venv
-env/
 venv/
 ENV/
-.myenv/
+env/
+.env
 
 # IDE
 .idea/
@@ -44,19 +42,19 @@ ENV/
 
 # OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints
 
 # Project specific
+*.db
+*.sqlite3
 *.log
+data/raw/
+notebooks/.ipynb_checkpoints/
 .coverage
 htmlcov/
-.pytest_cache/ data/processed/saber_pro.db
-data/processed/saber_pro.db
+
+# Render specific
+.render/ 
