@@ -8,10 +8,12 @@ from typing import Dict
 import os
 
 class SaberProProcessor:
-    def __init__(self, file_path: str):
-        self.file_path = file_path
+    def __init__(self, csv_path):
+        self.csv_path = csv_path
+        self.db_path = Path('data/processed/saber_pro.db')
         self.setup_logging()
-        
+        self.setup_database()
+    
     def setup_logging(self):
         """Configure logging for the data processing"""
         log_path = Path(__file__).parent.parent / 'data' / 'processed' / 'data_processing.log'
@@ -25,163 +27,137 @@ class SaberProProcessor:
             ]
         )
         self.logger = logging.getLogger(__name__)
+    
+    def setup_database(self):
+        # Create the processed directory if it doesn't exist
+        os.makedirs(self.db_path.parent, exist_ok=True)
+        self.logger.info(f"Creating database at: {self.db_path}")
         
-    def create_database(self) -> Path:
-        """Create SQLite database with proper schema"""
-        # Use absolute path
-        db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        print(f"Creating database at: {db_path}")
-        
-        conn = sqlite3.connect(db_path)
-        
-        # Drop existing table if it exists
-        conn.execute("DROP TABLE IF EXISTS saber_pro")
-        
-        # Create the main table with all columns
-        create_table_sql = """
+        # Create connection and table
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("""
         CREATE TABLE IF NOT EXISTS saber_pro (
             periodo TEXT,
+            year TEXT,
+            period_number TEXT,
             estu_consecutivo TEXT,
-            estu_tipodocumento TEXT,
-            estu_pais_reside TEXT,
-            estu_cod_reside_depto TEXT,
-            estu_depto_reside TEXT,
-            estu_cod_reside_mcpio TEXT,
-            estu_mcpio_reside TEXT,
-            estu_coddane_cole_termino TEXT,
-            estu_cod_cole_mcpio_termino TEXT,
-            estu_cod_depto_presentacion TEXT,
-            inst_cod_institucion TEXT,
-            inst_nombre_institucion TEXT,
-            inst_caracter_academico TEXT,
-            estu_nucleo_pregrado TEXT,
-            estu_inst_departamento TEXT,
-            estu_inst_codmunicipio TEXT,
-            estu_inst_municipio TEXT,
-            estu_prgm_academico TEXT,
-            estu_prgm_departamento TEXT,
-            estu_prgm_codmunicipio TEXT,
-            estu_prgm_municipio TEXT,
-            estu_nivel_prgm_academico TEXT,
-            estu_metodo_prgm TEXT,
-            estu_valormatriculauniversidad TEXT,
-            estu_depto_presentacion TEXT,
-            estu_cod_mcpio_presentacion TEXT,
-            estu_mcpio_presentacion TEXT,
-            estu_pagomatriculabeca TEXT,
-            estu_pagomatriculacredito TEXT,
-            estu_horassemanatrabaja TEXT,
-            estu_snies_prgmacademico TEXT,
-            estu_privado_libertad TEXT,
-            estu_nacionalidad TEXT,
-            estu_estudiante TEXT,
             estu_genero TEXT,
-            estu_cole_termino TEXT,
-            estu_pagomatriculapadres TEXT,
-            estu_estadoinvestigacion TEXT,
-            estu_fechanacimiento TEXT,
-            estu_pagomatriculapropio TEXT,
-            estu_tipodocumentosb11 TEXT,
+            estu_valormatriculauniversidad TEXT,
+            fami_estratovivienda TEXT,
             fami_educacionpadre TEXT,
+            fami_educacionmadre TEXT,
+            fami_tieneinternet TEXT,
+            fami_tienecomputador TEXT,
             fami_tieneautomovil TEXT,
             fami_tienelavadora TEXT,
-            fami_estratovivienda TEXT,
-            fami_tienecomputador TEXT,
-            fami_tieneinternet TEXT,
-            fami_educacionmadre TEXT,
+            estu_horassemanatrabaja TEXT,
             inst_origen TEXT,
             mod_razona_cuantitat_punt REAL,
-            mod_comuni_escrita_punt REAL,
-            mod_comuni_escrita_desem TEXT,
-            mod_ingles_desem TEXT,
             mod_lectura_critica_punt REAL,
             mod_ingles_punt REAL,
             mod_competen_ciudada_punt REAL
         )
-        """
-        
-        conn.execute(create_table_sql)
+        """)
         conn.close()
-        
-        return db_path
     
-    def process_data(self, chunk_size: int = 50000) -> None:
-        """Process the entire dataset in chunks"""
-        db_path = self.create_database()
-        conn = sqlite3.connect(db_path)
+    def process_data(self, chunk_size=50000, max_rows=None):
+        self.logger.info("Starting data processing...")
         
-        # Calculate total chunks for progress bar
-        total_rows = sum(1 for _ in open(self.file_path)) - 1
-        total_chunks = (total_rows // chunk_size) + 1
+        # Connect to database
+        conn = sqlite3.connect(self.db_path)
         
-        self.logger.info(f"Starting data processing: {total_rows:,} total rows")
+        # Process CSV in chunks
+        chunks = pd.read_csv(
+            self.csv_path,
+            chunksize=chunk_size,
+            dtype={'PERIODO': str},  # Ensure periodo is read as string
+            usecols=[
+                'PERIODO', 'ESTU_CONSECUTIVO', 'ESTU_GENERO',
+                'ESTU_VALORMATRICULAUNIVERSIDAD', 'FAMI_ESTRATOVIVIENDA',
+                'FAMI_EDUCACIONPADRE', 'FAMI_EDUCACIONMADRE',
+                'FAMI_TIENEINTERNET', 'FAMI_TIENECOMPUTADOR',
+                'FAMI_TIENEAUTOMOVIL', 'FAMI_TIENELAVADORA',
+                'ESTU_HORASSEMANATRABAJA', 'INST_ORIGEN',
+                'MOD_RAZONA_CUANTITAT_PUNT', 'MOD_LECTURA_CRITICA_PUNT',
+                'MOD_INGLES_PUNT', 'MOD_COMPETEN_CIUDADA_PUNT'
+            ]
+        )
         
-        chunks = pd.read_csv(self.file_path, chunksize=chunk_size)
-        for i, chunk in enumerate(tqdm(chunks, total=total_chunks, desc="Processing chunks")):
-            try:
-                # Convert column names to lowercase
-                chunk.columns = chunk.columns.str.lower()
-                
-                # Write to SQLite
-                chunk.to_sql('saber_pro', conn, if_exists='append', index=False)
-                
-                # Commit every chunk
-                conn.commit()
-                
-            except Exception as e:
-                self.logger.error(f"Error processing chunk {i}: {str(e)}")
-                conn.rollback()
-                raise
+        rows_processed = 0
+        for chunk in chunks:
+            # Rename columns to match database schema
+            chunk.columns = [col.lower() for col in chunk.columns]
+            
+            # Format year from periodo (e.g., '20183' to '2018')
+            chunk['year'] = chunk['periodo'].astype(str).str[:4]
+            chunk['period_number'] = chunk['periodo'].astype(str).str[4:]
+            
+            # Convert numeric columns
+            numeric_cols = ['mod_razona_cuantitat_punt', 'mod_lectura_critica_punt',
+                          'mod_ingles_punt', 'mod_competen_ciudada_punt']
+            for col in numeric_cols:
+                chunk[col] = pd.to_numeric(chunk[col], errors='coerce')
+            
+            # Save to database
+            chunk.to_sql('saber_pro', conn, if_exists='append', index=False)
+            
+            rows_processed += len(chunk)
+            self.logger.info(f"Processed {rows_processed:,} rows")
+            
+            if max_rows and rows_processed >= max_rows:
+                break
         
-        # Create indexes for better query performance
-        print("\nCreating indexes...")
+        # Create indexes for better performance
+        self.logger.info("Creating indexes...")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_year ON saber_pro(year)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_periodo ON saber_pro(periodo)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_genero ON saber_pro(estu_genero)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_estrato ON saber_pro(fami_estratovivienda)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_caracter ON saber_pro(inst_caracter_academico)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_origen ON saber_pro(inst_origen)")
         
-        # Verify data loading
+        # Get total count
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM saber_pro")
         total_count = cursor.fetchone()[0]
-        print(f"\nTotal records loaded: {total_count:,}")
+        self.logger.info(f"Total records in database: {total_count:,}")
         
         conn.close()
-        self.logger.info("Data processing completed successfully")
+        self.logger.info("Data processing completed!")
     
-    def get_basic_stats(self) -> Dict:
-        """Calculate basic statistics from the processed database"""
-        db_path = Path(__file__).parent.parent / 'data' / 'processed' / 'saber_pro.db'
-        conn = sqlite3.connect(db_path)
+    def get_basic_stats(self):
+        conn = sqlite3.connect(self.db_path)
         
-        stats = {}
+        # Get year and period distribution
+        period_dist = pd.read_sql("""
+            SELECT 
+                year,
+                period_number,
+                COUNT(*) as count
+            FROM saber_pro
+            GROUP BY year, period_number
+            ORDER BY year, period_number
+        """, conn)
         
-        # Get period distribution
-        period_query = """
-        SELECT periodo, COUNT(*) as count
-        FROM saber_pro
-        GROUP BY periodo
-        ORDER BY periodo
-        """
-        stats['period_distribution'] = pd.read_sql_query(period_query, conn)
-        
-        # Get average scores by period
-        scores_query = """
-        SELECT 
-            periodo,
-            ROUND(AVG(mod_razona_cuantitat_punt), 2) as avg_math,
-            ROUND(AVG(mod_lectura_critica_punt), 2) as avg_reading,
-            ROUND(AVG(mod_ingles_punt), 2) as avg_english
-        FROM saber_pro
-        GROUP BY periodo
-        ORDER BY periodo
-        """
-        stats['average_scores'] = pd.read_sql_query(scores_query, conn)
+        # Get average scores by year
+        avg_scores = pd.read_sql("""
+            SELECT 
+                year,
+                ROUND(AVG(mod_razona_cuantitat_punt), 2) as avg_razona_cuantitat,
+                ROUND(AVG(mod_lectura_critica_punt), 2) as avg_lectura_critica,
+                ROUND(AVG(mod_ingles_punt), 2) as avg_ingles,
+                ROUND(AVG(mod_competen_ciudada_punt), 2) as avg_competen_ciudada,
+                COUNT(*) as students
+            FROM saber_pro
+            GROUP BY year
+            ORDER BY year
+        """, conn)
         
         conn.close()
-        return stats 
+        
+        return {
+            'period_distribution': period_dist,
+            'average_scores': avg_scores
+        }
 
 def query_db(query, params=None):
     """Helper function to run SQL queries"""
@@ -254,4 +230,25 @@ def prepare_regression_variables(data):
     
     return X, y 
 
-# Remove the __main__ block from the file 
+if __name__ == '__main__':
+    # Path to the actual CSV file
+    csv_path = '/Users/manuelcastillo/Documents/Saber_pro_dataset/Resultados__nicos_Saber_Pro_20250201.csv'
+    
+    # Create processor instance
+    processor = SaberProProcessor(csv_path)
+    
+    try:
+        # Process only 10,000 records with a smaller chunk size
+        processor.process_data(chunk_size=1000, max_rows=10000)
+        print("Data processing completed successfully!")
+        
+        # Calculate and display basic stats
+        stats = processor.get_basic_stats()
+        print("\nBasic Statistics:")
+        print("\nPeriod Distribution:")
+        print(stats['period_distribution'])
+        print("\nAverage Scores by Period:")
+        print(stats['average_scores'])
+        
+    except Exception as e:
+        print(f"Error processing data: {str(e)}") 
